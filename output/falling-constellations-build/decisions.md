@@ -12,3 +12,7 @@
 | 2026-10-31 | Constellation names (report upgrade 3, plan req 5) | **Removed: "we don't need the names".** No labels or name generator; EB Garamond is now used only by the hint text |
 | 2026-10-31 | Draw-in behaviour (report upgrade 4, plan req 6, brought forward from M2) | **Stars appear first, one by one; lines draw only once the whole figure is on screen**, eased one after another with overlap over 2–4 s |
 | 2026-10-31 | Milestone 1 commit | Committed as `5296567` and pushed |
+| 2026-10-31 | Milestone 2 commit | Committed as `9d10cf0` and pushed |
+| 2026-10-31 | Nebula timing. Options: bake now on the CPU and reuse the image as the WebGL texture later, or keep nebulae in M5. Recommended: bake now. | **Bake now, reuse later** |
+| 2026-10-31 | Nebula look. Options: field nebulae, galaxy gas only (report), both. Recommended: field nebulae. | **Field nebulae** (faint coloured clouds behind everything); galaxy gas stays in M5 as planned |
+| 2026-10-31 | Extra background structures (new scope beyond the report) | **Dark dust clouds, distant galaxies, star clusters** |

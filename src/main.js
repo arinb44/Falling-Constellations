@@ -5,6 +5,7 @@ import { fitStars, drawStars } from './starfield.js';
 import { makeConstellation, targetCount, countAuto, recycle, drawConstellation } from './constellation.js';
 import { maybeShoot, drawShooters } from './shooters.js';
 import { buildSprites } from './sprites.js';
+import { createField, drawFieldBack, drawFieldDust } from './sky/field.js';
 import { createFrameStats, mountReadout } from './debug.js';
 
 const canvas = document.getElementById('c');
@@ -14,6 +15,10 @@ const view = { W: 0, H: 0, DPR: 1 };
 
 /* ---------- Atlas look: star sprites drawn once ---------- */
 const look = { sprites: buildSprites() };
+
+/* ---------- far field: nebulae, dust, distant galaxies, clusters (one seed per visit) ---------- */
+const field = createField();
+let rebakeTimer = 0;
 
 // Sim clock: advances by the clamped dt, so a paused or backgrounded tab
 // resumes exactly where it left off instead of jumping ahead.
@@ -41,6 +46,9 @@ function resize() {
   fitStars(view, prevW, prevH);
   // keep the sky: constellations slide to the same relative x instead of regenerating
   if (prevW > 0) for (const c of cons) c.baseX *= view.W / prevW;
+  // the nebula/dust images are re-baked once the window stops changing size
+  if (!field.nebula) field.bake(view.W, view.H);
+  else { clearTimeout(rebakeTimer); rebakeTimer = setTimeout(() => field.bake(view.W, view.H), 250); }
 }
 addEventListener('resize', resize);
 
@@ -69,9 +77,12 @@ function frame(now) {
   clock += dt;
   const t = clock, { W, H } = view;
 
+  // far to near: background, nebulae and distant objects, starfield, dust, galaxy
   background(W, H);
-  drawGalaxy(ctx, view, t);
+  drawFieldBack(ctx, view, field, t);
   drawStars(ctx, view, t, dt);
+  drawFieldDust(ctx, view, field);
+  drawGalaxy(ctx, view, t);
 
   // recycle: remove those that have fallen off, spawn new ones at the top
   recycle(cons, H);
@@ -82,7 +93,7 @@ function frame(now) {
 
   if (stats && stats.add(Math.max(0, raw))) {
     const o = stats.out;
-    readout.textContent = `${o.fps.toFixed(0)} fps  avg ${o.avgMs.toFixed(1)} ms  worst ${o.worstMs.toFixed(1)} ms\n${cons.length} constellations  ${W}×${H} @${view.DPR}x`;
+    readout.textContent = `${o.fps.toFixed(0)} fps  avg ${o.avgMs.toFixed(1)} ms  worst ${o.worstMs.toFixed(1)} ms\n${cons.length} constellations  ${W}×${H} @${view.DPR}x\nfield bake ${field.w}×${field.h} in ${field.bakeMs.toFixed(0)} ms`;
   }
   rafId = requestAnimationFrame(frame);
 }

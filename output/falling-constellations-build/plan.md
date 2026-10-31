@@ -29,6 +29,7 @@ Numbers in brackets are the report's upgrade numbers.
 18. **[16] Adaptive quality:** frame time averaged over 1–2 s after startup; steps down resolution → star count → bloom levels; steps back up slowly.
 19. **[17] Context loss:** rebuild GPU resources on `webglcontextrestored`; tested with `WEBGL_lose_context`.
 20. Starfield and shooting stars keep working on the 2D layer, restyled only as needed to fit the palette and the zero-allocation rule.
+21. **Far field (added 2026-10-31 at the user's request):** faint coloured field nebulae (domain-warped FBM, baked once at startup into a low-res image and redrawn on resize only), dark dust clouds that dim the background stars behind them, a few faint distant galaxies, and a few small star clusters. All drift together very slowly. The nebula bake is reused as a WebGL texture from Milestone 3.
 
 ## Scope
 **In scope:** requirements 1–20; updating `HANDOFF.md` to describe the new architecture; a `.claude/launch.json` entry so the browser pane can serve the page.
@@ -49,6 +50,8 @@ src/galaxy/model.js   star data generation, orbit maths and colours (pure, mirro
 src/galaxy/gl.js      WebGL2 setup, buffers, render targets, context loss
 src/galaxy/shaders.js GLSL sources: stars, dust, nebula bake, bloom, tone map
 src/quality.js        adaptive-quality controller (pure state machine)
+src/sky/noise.js      seeded RNG, gradient noise, FBM, domain warp (pure; added for req 21)
+src/sky/field.js      far-field bakes: nebulae, dust, distant galaxies, clusters (added for req 21)
 test/*.test.js        bun tests
 ```
 ES modules mean the page must be served (`python3 -m http.server 8000`, already the documented way to run it in `HANDOFF.md`); opening the file directly would no longer work.
@@ -86,6 +89,7 @@ Each one ends with tests run, a screenshot, and a proposed commit.
 0. **Test and dev setup:** split the prototype into modules with no behaviour change; `package.json`; first tests for util and the generator; `?debug` frame-time readout; launch config. (Req 1, 2, 20)
 1. **Stage 1a, Atlas look:** ink palette, graded size classes, sprites, engraved lines with gaps, EB Garamond labels. (Req 3, 4, 5)
 2. **Stage 1b, motion and hygiene:** eased draw-in and fades, zero-allocation loop, pooling, `isAuto` fix, resize without repopulating, visibility pause. (Req 6, 7, 8)
+2b. **Far field (added):** seeded noise, nebula and dust bakes, distant-galaxy and cluster sprites, layer order bg → nebula → galaxies/clusters → starfield → dust → galaxy → constellations. (Req 21)
 3. **Stage 2, WebGL galaxy:** two-layer canvases, static buffer, instanced quads, tilted-ellipse vertex shader, colour by population; remove the 2D galaxy. (Req 9, 10, 11)
 4. **Stage 3a, HDR and bloom:** half-float target with fallback, ACES tone map, bloom chain. (Req 12, 13)
 5. **Stage 3b, structure and grading:** dust lanes, H-II knots, baked nebula, grading. (Req 14, 15, 16)
