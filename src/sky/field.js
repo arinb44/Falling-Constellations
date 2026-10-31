@@ -19,34 +19,68 @@ export const NEBULA_COLOURS = [
 export const NEBULA_PEAK = 115;                // brightest channel value of one cloud; keeps them faint
 const PEAK_SCALE = NEBULA_PEAK / Math.max(...NEBULA_COLOURS.flat());
 
-export function makeClouds(rng, aspect, count = 3) {
-  const clouds = [];
+// Clouds sit on a ring around the galaxy, one per equal sector (with some jitter), so they
+// spread around the whole sky instead of bunching on one side. Neighbours get different colours.
+export const CLOUD_COUNT = 5;
+export function makeClouds(rng, aspect, count = CLOUD_COUNT) {
+  const clouds = [], start = rng() * Math.PI * 2, c0 = Math.floor(rng() * NEBULA_COLOURS.length);
   for (let i = 0; i < count; i++) {
-    let u, v, guard = 0;
-    do { u = rng(); v = rng(); } while (Math.hypot((u - 0.5) * aspect, v - 0.5) < 0.28 && guard++ < 50);
-    clouds.push({ u, v, r: 0.22 + rng() * 0.22, colour: NEBULA_COLOURS[Math.floor(rng() * NEBULA_COLOURS.length)], strength: 0.6 + rng() * 0.4, ox: rng() * 100, oy: rng() * 100 });
+    const ang = start + (i + (rng() - 0.5) * 0.6) * (Math.PI * 2 / count);
+    const dist = 0.34 + rng() * 0.1;               // in field units, clear of the galaxy core
+    const u = Math.min(0.95, Math.max(0.05, 0.5 + Math.cos(ang) * dist));
+    const v = Math.min(0.95, Math.max(0.05, 0.5 + Math.sin(ang) * dist));
+    // cycle colours; the last cloud also neighbours the first, so step past its colour
+    let ci = (c0 + i) % NEBULA_COLOURS.length;
+    if (i === count - 1 && i > 0 && ci === c0) ci = (ci + 1) % NEBULA_COLOURS.length;
+    clouds.push({ u, v, r: 0.2 + rng() * 0.12, colour: NEBULA_COLOURS[ci], strength: 0.6 + rng() * 0.4, ox: rng() * 100, oy: rng() * 100,
+      pulseAt: -1e9, next: rng() * PULSE.MAX_GAP });   // first pulses are staggered
   }
   return clouds;
 }
 
-// RGBA bytes for a w×h image, drawn additively over the background (black adds nothing).
-export function nebulaPixels(w, h, clouds, noise) {
-  const out = new Uint8ClampedArray(w * h * 4), aspect = w / h;
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const u = x / w, v = y / h, i = (y * w + x) * 4;
-    let r = 0, g = 0, b = 0;
-    for (const c of clouds) {
-      const d = Math.hypot((u - c.u) * aspect, v - c.v) / c.r;
-      if (d >= 1) continue;
-      const fall = (1 - d * d) * (1 - d * d);
-      const n = warped(noise, u * aspect * 2.2 + c.ox, v * 2.2 + c.oy, 3.2, 4);
-      const fine = 0.75 + 0.25 * fbm(noise, u * aspect * 9 + c.oy, v * 9 + c.ox, 3);
-      const k = fall * smoothstep(-0.15, 0.55, n) * fine * c.strength;
-      r += c.colour[0] * k; g += c.colour[1] * k; b += c.colour[2] * k;
-    }
-    out[i] = r * PEAK_SCALE; out[i + 1] = g * PEAK_SCALE; out[i + 2] = b * PEAK_SCALE; out[i + 3] = 255;
+// One cloud's brightness factor at field position (u, v); 0 outside its radius.
+function cloudAt(c, u, v, aspect, noise) {
+  const d = Math.hypot((u - c.u) * aspect, v - c.v) / c.r;
+  if (d >= 1) return 0;
+  const fall = (1 - d * d) * (1 - d * d);
+  const n = warped(noise, u * aspect * 2.2 + c.ox, v * 2.2 + c.oy, 3.2, 4);
+  const fine = 0.75 + 0.25 * fbm(noise, u * aspect * 9 + c.oy, v * 9 + c.ox, 3);
+  return fall * smoothstep(-0.15, 0.55, n) * fine * c.strength;
+}
+
+// One cloud baked on its own, cropped to its bounding box inside a w×h field image, so each
+// cloud can be drawn (and pulsed) separately. RGBA bytes, drawn additively (black adds nothing).
+export function cloudPixels(w, h, c, noise) {
+  const aspect = w / h;
+  const x0 = Math.max(0, Math.floor((c.u - c.r / aspect) * w)), x1 = Math.min(w, Math.ceil((c.u + c.r / aspect) * w));
+  const y0 = Math.max(0, Math.floor((c.v - c.r) * h)), y1 = Math.min(h, Math.ceil((c.v + c.r) * h));
+  const cw = Math.max(1, x1 - x0), ch = Math.max(1, y1 - y0), rgba = new Uint8ClampedArray(cw * ch * 4);
+  for (let y = 0; y < ch; y++) for (let x = 0; x < cw; x++) {
+    const k = cloudAt(c, (x0 + x) / w, (y0 + y) / h, aspect, noise) * PEAK_SCALE, i = (y * cw + x) * 4;
+    rgba[i] = c.colour[0] * k; rgba[i + 1] = c.colour[1] * k; rgba[i + 2] = c.colour[2] * k; rgba[i + 3] = 255;
   }
-  return out;
+  return { x0, y0, cw, ch, rgba };
+}
+
+/* ---------- pulses: each cloud brightens now and then, on its own random timer ---------- */
+export const PULSE = {
+  GAIN: 1.2,         // extra brightness at the peak (2.2× the resting cloud)
+  RISE: 1.2,         // seconds to swell
+  FALL: 3.5,         // seconds to settle back
+  MIN_GAP: 7,        // seconds between pulse starts; longer than a whole pulse, so they never cut off
+  MAX_GAP: 18
+};
+const PULSE_END = PULSE.RISE + PULSE.FALL * 1.5;
+
+export const pulseShape = x => {
+  if (x <= 0 || x >= PULSE_END) return 0;
+  return x < PULSE.RISE ? smoothstep(0, PULSE.RISE, x) : Math.exp(-3 * (x - PULSE.RISE) / PULSE.FALL);
+};
+
+// Advances one cloud's timer and returns its brightness factor (1 at rest).
+export function pulse(c, t, rand = Math.random) {
+  if (t >= c.next) { c.pulseAt = t; c.next = t + PULSE.MIN_GAP + rand() * (PULSE.MAX_GAP - PULSE.MIN_GAP); }
+  return 1 + PULSE.GAIN * pulseShape(t - c.pulseAt);
 }
 
 /* ---------- dark dust: one or two wispy lanes that dim the stars behind them ---------- */
@@ -167,21 +201,28 @@ export function createField(seed = Math.floor(Math.random() * 2 ** 31), makeCanv
   const lanes = makeLanes(rng);
   const galaxies = makeDistantGalaxies(rng).map(g => ({ ...g, sprite: paintGalaxy(g, makeCanvas) }));
   const clusters = makeClusters(rng).map(cl => ({ ...cl, sprite: paintCluster(cl, makeCanvas) }));
-  const field = { seed, lanes, galaxies, clusters, clouds: null, nebula: null, dust: null, nebulaRGBA: null, w: 0, h: 0, bakeMs: 0 };
+  const field = { seed, lanes, galaxies, clusters, clouds: null, dust: null, w: 0, h: 0, bakeMs: 0, version: 0 };
 
   // Re-bakes the nebula and dust images for a viewport size (startup and resize only).
   field.bake = (W, H) => {
     const t0 = performance.now();
     const fw = W * (1 + 2 * FIELD_MARGIN), fh = H * (1 + 2 * FIELD_MARGIN);
     const w = Math.max(16, Math.round(fw * BAKE_SCALE)), h = Math.max(16, Math.round(fh * BAKE_SCALE));
-    // clouds depend on the aspect, so derive them from their own seeded stream each time
+    // clouds depend on the aspect, so derive them from their own seeded stream each time,
+    // keeping each cloud's pulse timer across resizes
+    const prev = field.clouds;
     field.clouds = makeClouds(mulberry32(seed ^ 0x9e3779b9), w / h);
-    field.nebulaRGBA = nebulaPixels(w, h, field.clouds, noise);
-    field.nebula = imageCanvas(w, h, field.nebulaRGBA, makeCanvas);
+    field.clouds.forEach((c, i) => {
+      if (prev) { c.pulseAt = prev[i].pulseAt; c.next = prev[i].next; }
+      const img = cloudPixels(w, h, c, noise);
+      c.rgba = img.rgba;
+      c.image = imageCanvas(img.cw, img.ch, img.rgba, makeCanvas);
+      c.rect = { u: img.x0 / w, v: img.y0 / h, uw: img.cw / w, vh: img.ch / h };   // in field units
+    });
     const a = dustAlpha(w, h, lanes, noise), rgba = new Uint8ClampedArray(w * h * 4);
     for (let i = 0; i < a.length; i++) rgba[i * 4 + 3] = a[i];            // black with alpha
     field.dust = imageCanvas(w, h, rgba, makeCanvas);
-    field.w = w; field.h = h;
+    field.w = w; field.h = h; field.version++;
     field.bakeMs = performance.now() - t0;
   };
   return field;
@@ -202,7 +243,15 @@ export function drawFieldBack(ctx, view, field, t) {
   const fw = W * (1 + 2 * FIELD_MARGIN), fh = H * (1 + 2 * FIELD_MARGIN);
   ctx.imageSmoothingQuality = 'high';
   ctx.globalCompositeOperation = 'lighter';
-  ctx.drawImage(field.nebula, o.x, o.y, fw, fh);
+  for (let i = 0; i < field.clouds.length; i++) {
+    const c = field.clouds[i], r = c.rect, x = o.x + r.u * fw, y = o.y + r.v * fh, w = r.uw * fw, h = r.vh * fh;
+    // globalAlpha stops at 1, so the bright part of a pulse is a second additive pass
+    const b = pulse(c, t);
+    ctx.globalAlpha = 1; ctx.drawImage(c.image, x, y, w, h);
+    if (b > 1.001) { ctx.globalAlpha = Math.min(1, b - 1); ctx.drawImage(c.image, x, y, w, h); }
+    if (b > 2.001) { ctx.globalAlpha = b - 2; ctx.drawImage(c.image, x, y, w, h); }
+  }
+  ctx.globalAlpha = 1;
   for (let i = 0; i < field.clusters.length; i++) {
     const c = field.clusters[i], d = c.sprite.size;
     ctx.drawImage(c.sprite.canvas, o.x + c.u * fw - d / 2, o.y + c.v * fh - d / 2, d, d);

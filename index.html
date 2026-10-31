@@ -9,7 +9,8 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond&display=swap">
 <style>
   html, body { margin: 0; height: 100%; background: #02030a; overflow: hidden; }
-  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  canvas { position: fixed; inset: 0; display: block; width: 100vw; height: 100vh; }
+  #c { cursor: crosshair; }          /* transparent 2D layer over the WebGL back layer */
   #hint {
     position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
     font: small-caps 15px/1 "EB Garamond", Garamond, "Times New Roman", serif; letter-spacing: .2em;
@@ -19,6 +20,7 @@
 </style>
 </head>
 <body>
+<canvas id="gl"></canvas>
 <canvas id="c"></canvas>
 <div id="hint">click to summon a constellation</div>
 <script type="module" src="src/main.js"></script>

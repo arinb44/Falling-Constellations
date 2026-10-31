@@ -1,7 +1,7 @@
 import { test, expect } from 'bun:test';
 import { mulberry32, makeNoise } from '../src/sky/noise.js';
 import {
-  makeClouds, nebulaPixels, NEBULA_PEAK, makeLanes, dustAlpha, DUST_MAX_ALPHA,
+  makeClouds, CLOUD_COUNT, cloudPixels, NEBULA_PEAK, PULSE, pulseShape, pulse, makeLanes, dustAlpha, DUST_MAX_ALPHA,
   makeDistantGalaxies, makeClusters, fieldOrigin, FIELD_MARGIN, createField
 } from '../src/sky/field.js';
 
@@ -14,21 +14,67 @@ test('clouds avoid the galaxy core and use the nebula palette', () => {
   }
 });
 
-test('nebula pixels are faint, opaque-black elsewhere, and actually contain cloud', () => {
-  const rng = mulberry32(3), noise = makeNoise(rng);
-  const w = 120, h = 80, clouds = makeClouds(rng, w / h);
-  const px = nebulaPixels(w, h, clouds, noise);
-  expect(px.length).toBe(w * h * 4);
-  let lit = 0, max = 0;
-  for (let i = 0; i < px.length; i += 4) {
-    expect(px[i + 3]).toBe(255);
-    const m = Math.max(px[i], px[i + 1], px[i + 2]);
-    if (m > 2) lit++;
-    max = Math.max(max, m);
+test('clouds spread around the whole sky instead of bunching on one side', () => {
+  for (let s = 0; s < 200; s++) {
+    for (const aspect of [0.5, 1, 1.8]) {
+      const cs = makeClouds(mulberry32(s), aspect);
+      expect(cs.length).toBe(CLOUD_COUNT);
+      const quads = new Set(cs.map(c => (c.u < 0.5 ? 0 : 1) + (c.v < 0.5 ? 0 : 2)));
+      expect(quads.size).toBeGreaterThanOrEqual(3);
+      const cu = cs.reduce((a, c) => a + c.u, 0) / cs.length, cv = cs.reduce((a, c) => a + c.v, 0) / cs.length;
+      expect(Math.hypot(cu - 0.5, cv - 0.5)).toBeLessThan(0.15);    // balanced around the centre
+      for (let i = 0; i < cs.length; i++) expect(cs[i].colour).not.toBe(cs[(i + 1) % cs.length].colour);
+    }
   }
-  expect(lit / (w * h)).toBeGreaterThan(0.03);   // some sky has cloud
-  expect(lit / (w * h)).toBeLessThan(0.8);       // but not all of it
-  expect(max).toBeLessThanOrEqual(NEBULA_PEAK * 2);   // overlapping clouds may add, still faint
+});
+
+test('each cloud bakes on its own, cropped to its bounding box, faint and partly filled', () => {
+  const rng = mulberry32(3), noise = makeNoise(rng);
+  const w = 120, h = 80;
+  for (const c of makeClouds(rng, w / h)) {
+    const img = cloudPixels(w, h, c, noise);
+    expect(img.rgba.length).toBe(img.cw * img.ch * 4);
+    expect(img.x0).toBeGreaterThanOrEqual(0); expect(img.x0 + img.cw).toBeLessThanOrEqual(w);
+    expect(img.cw).toBeLessThan(w);                                // cropped, not the whole field
+    let lit = 0, max = 0;
+    for (let i = 0; i < img.rgba.length; i += 4) {
+      expect(img.rgba[i + 3]).toBe(255);
+      const m = Math.max(img.rgba[i], img.rgba[i + 1], img.rgba[i + 2]);
+      if (m > 2) lit++; max = Math.max(max, m);
+    }
+    expect(lit).toBeGreaterThan(0);
+    expect(max).toBeLessThanOrEqual(NEBULA_PEAK + 1);
+  }
+});
+
+test('pulse shape swells, peaks, then settles back to rest', () => {
+  expect(pulseShape(-1)).toBe(0);
+  expect(pulseShape(0)).toBe(0);
+  expect(pulseShape(PULSE.RISE)).toBeCloseTo(1);
+  expect(pulseShape(PULSE.RISE + PULSE.FALL)).toBeLessThan(0.06);
+  expect(pulseShape(PULSE.RISE + PULSE.FALL * 2)).toBe(0);
+  let prev = 2;
+  for (let x = PULSE.RISE; x < PULSE.RISE + PULSE.FALL * 1.5; x += 0.1) { const v = pulseShape(x); expect(v).toBeLessThanOrEqual(prev); prev = v; }
+});
+
+test('each cloud pulses at random intervals, peaking at 2.2x and never cut short', () => {
+  const rng = mulberry32(11), clouds = makeClouds(rng, 1.5);
+  const starts = clouds.map(() => []), peak = clouds.map(() => 1);
+  for (let t = 0; t < 600; t += 1 / 30) clouds.forEach((c, i) => {
+    const before = c.pulseAt, b = pulse(c, t, rng);
+    if (c.pulseAt !== before) starts[i].push(t);
+    expect(b).toBeGreaterThanOrEqual(1); expect(b).toBeLessThanOrEqual(1 + PULSE.GAIN + 1e-9);
+    peak[i] = Math.max(peak[i], b);
+  });
+  for (let i = 0; i < clouds.length; i++) {
+    expect(peak[i]).toBeCloseTo(1 + PULSE.GAIN, 1);
+    expect(starts[i].length).toBeGreaterThan(600 / PULSE.MAX_GAP - 2);
+    const gaps = starts[i].slice(1).map((s, k) => s - starts[i][k]);
+    for (const g of gaps) { expect(g).toBeGreaterThanOrEqual(PULSE.MIN_GAP - 0.05); expect(g).toBeLessThanOrEqual(PULSE.MAX_GAP + 0.05); }
+    expect(Math.max(...gaps) - Math.min(...gaps)).toBeGreaterThan(2);   // intervals vary
+  }
+  // clouds don't pulse in lockstep
+  expect(new Set(starts.map(s => s[0].toFixed(1))).size).toBeGreaterThan(1);
 });
 
 test('dust is a partial black mask capped at its max alpha', () => {
@@ -86,10 +132,13 @@ test('createField bakes from a seed and the same seed gives the same sky', () =>
   const a = createField(1234, fake), b = createField(1234, fake);
   a.bake(300, 200); b.bake(300, 200);
   expect(a.w).toBe(Math.round(300 * 1.2 / 3));
-  expect(a.nebulaRGBA).toEqual(b.nebulaRGBA);
+  expect(a.clouds.map(c => c.rgba)).toEqual(b.clouds.map(c => c.rgba));
   expect(a.galaxies.map(g => g.u)).toEqual(b.galaxies.map(g => g.u));
+  a.clouds[0].next = 123;
   a.bake(600, 200);                                              // resize keeps the same objects
   expect(a.galaxies.map(g => g.u)).toEqual(b.galaxies.map(g => g.u));
+  expect(a.clouds[0].next).toBe(123);                            // ...and each cloud's pulse timer
+  expect(a.version).toBe(2);
 });
 
 function fakeCtx(w, h) {

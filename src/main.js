@@ -1,11 +1,11 @@
 /* ---------- Falling Constellations: loop, resize, input ---------- */
 import { rand } from './util.js';
-import { buildGalaxy, drawGalaxy } from './galaxy/canvas2d.js';
 import { fitStars, drawStars } from './starfield.js';
 import { makeConstellation, targetCount, countAuto, recycle, drawConstellation } from './constellation.js';
 import { maybeShoot, drawShooters } from './shooters.js';
 import { buildSprites } from './sprites.js';
 import { createField, drawFieldBack, drawFieldDust } from './sky/field.js';
+import { createBackLayer } from './galaxy/gl.js';
 import { createFrameStats, mountReadout } from './debug.js';
 
 const canvas = document.getElementById('c');
@@ -19,6 +19,13 @@ const look = { sprites: buildSprites() };
 /* ---------- far field: nebulae, dust, distant galaxies, clusters (one seed per visit) ---------- */
 const field = createField();
 let rebakeTimer = 0;
+
+/* ---------- WebGL2 back layer (galaxy, far field, background stars) ---------- */
+// Without WebGL2 the far field and starfield fall back to the 2D canvas, with no galaxy.
+let back = null;
+const params = new URLSearchParams(location.search);
+try { if (!params.has('nogl')) back = createBackLayer(document.getElementById('gl'), field); }   // ?nogl: test the fallback
+catch (err) { console.error(err); }
 
 // Sim clock: advances by the clamped dt, so a paused or backgrounded tab
 // resumes exactly where it left off instead of jumping ahead.
@@ -43,16 +50,17 @@ function resize() {
   view.W = innerWidth; view.H = innerHeight;
   canvas.width = view.W * view.DPR; canvas.height = view.H * view.DPR;
   ctx.setTransform(view.DPR, 0, 0, view.DPR, 0, 0);
-  fitStars(view, prevW, prevH);
+  if (back) back.resize(view.W, view.H, view.DPR);
+  else fitStars(view, prevW, prevH);
   // keep the sky: constellations slide to the same relative x instead of regenerating
   if (prevW > 0) for (const c of cons) c.baseX *= view.W / prevW;
   // the nebula/dust images are re-baked once the window stops changing size
-  if (!field.nebula) field.bake(view.W, view.H);
+  if (!field.version) field.bake(view.W, view.H);
   else { clearTimeout(rebakeTimer); rebakeTimer = setTimeout(() => field.bake(view.W, view.H), 250); }
 }
 addEventListener('resize', resize);
 
-/* ---------- background, rebuilt only on resize ---------- */
+/* ---------- 2D background (fallback only), rebuilt only on resize ---------- */
 let bg = null, bgH = 0;
 function background(W, H) {
   if (bgH !== H) {
@@ -65,7 +73,7 @@ function background(W, H) {
 }
 
 /* ---------- debug readout ---------- */
-const debug = new URLSearchParams(location.search).has('debug');
+const debug = params.has('debug');
 const stats = debug ? createFrameStats() : null;
 const readout = debug ? mountReadout() : null;
 
@@ -78,11 +86,15 @@ function frame(now) {
   const t = clock, { W, H } = view;
 
   // far to near: background, nebulae and distant objects, starfield, dust, galaxy
-  background(W, H);
-  drawFieldBack(ctx, view, field, t);
-  drawStars(ctx, view, t, dt);
-  drawFieldDust(ctx, view, field);
-  drawGalaxy(ctx, view, t);
+  if (back) {
+    back.draw(t);
+    ctx.clearRect(0, 0, W, H);
+  } else {
+    background(W, H);
+    drawFieldBack(ctx, view, field, t);
+    drawStars(ctx, view, t, dt);
+    drawFieldDust(ctx, view, field);
+  }
 
   // recycle: remove those that have fallen off, spawn new ones at the top
   recycle(cons, H);
@@ -93,7 +105,7 @@ function frame(now) {
 
   if (stats && stats.add(Math.max(0, raw))) {
     const o = stats.out;
-    readout.textContent = `${o.fps.toFixed(0)} fps  avg ${o.avgMs.toFixed(1)} ms  worst ${o.worstMs.toFixed(1)} ms\n${cons.length} constellations  ${W}×${H} @${view.DPR}x\nfield bake ${field.w}×${field.h} in ${field.bakeMs.toFixed(0)} ms`;
+    readout.textContent = `${o.fps.toFixed(0)} fps  avg ${o.avgMs.toFixed(1)} ms  worst ${o.worstMs.toFixed(1)} ms\n${cons.length} constellations  ${W}×${H} @${view.DPR}x\nfield bake ${field.w}×${field.h} in ${field.bakeMs.toFixed(0)} ms  ${back ? 'WebGL2' : '2D fallback'}`;
   }
   rafId = requestAnimationFrame(frame);
 }
@@ -104,6 +116,6 @@ document.addEventListener('visibilitychange', () => {
   else start();
 });
 
-buildGalaxy(); resize(); populate();
+resize(); populate();
 setTimeout(() => { hint.style.opacity = 0; }, 8000);
 start();

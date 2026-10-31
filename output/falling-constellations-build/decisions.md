@@ -16,3 +16,9 @@
 | 2026-10-31 | Nebula timing. Options: bake now on the CPU and reuse the image as the WebGL texture later, or keep nebulae in M5. Recommended: bake now. | **Bake now, reuse later** |
 | 2026-10-31 | Nebula look. Options: field nebulae, galaxy gas only (report), both. Recommended: field nebulae. | **Field nebulae** (faint coloured clouds behind everything); galaxy gas stays in M5 as planned |
 | 2026-10-31 | Extra background structures (new scope beyond the report) | **Dark dust clouds, distant galaxies, star clusters** |
+| 2026-10-31 | Milestone 2b commit | Committed as `57de6fa` and pushed |
+| 2026-10-31 | Layer split for M3. Options: far field + background stars to WebGL; far field only (dust can't dim stars); dust stays 2D (would dim the galaxy). Recommended: far field + stars to WebGL. | **Far field and background stars move to WebGL** (bg → nebulae → galaxies/clusters → stars → dust → galaxy); 2D canvas keeps constellations, shooting stars and hint |
+| 2026-10-31 | Nebula placement (feedback: "only at the top left") | Clouds now placed one per equal sector on a ring around the galaxy (5 clouds, neighbours differ in colour) |
+| 2026-10-31 | Galaxy centre brightness (feedback: "tone it down once it reaches the center by 20%") | Stars ease down to 80% brightness inside radius 0.22; core glow cut by the same 20% |
+| 2026-10-31 | Galaxy centre, second pass (feedback: "still too bright, make it 50%") | **50%**: stars ease down to half brightness at the centre; core glow halved |
+| 2026-10-31 | Nebula pulses (request: "pulse, so it becomes bright in random intervals") | Each cloud baked separately and pulsed on its own timer: swells to 2.2× over 1.2 s, settles over ~3.5 s, every 7–18 s at random; first pulses staggered |
