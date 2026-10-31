@@ -4,13 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Falling Constellations</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=EB+Garamond&display=swap">
 <style>
   html, body { margin: 0; height: 100%; background: #02030a; overflow: hidden; }
   canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
   #hint {
     position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
-    font: 12px/1 ui-monospace, Menlo, Consolas, monospace; letter-spacing: .18em;
-    color: rgba(170, 190, 230, .45); text-transform: uppercase; pointer-events: none;
+    font: small-caps 15px/1 "EB Garamond", Garamond, "Times New Roman", serif; letter-spacing: .2em;
+    color: rgba(232, 216, 180, .5); pointer-events: none;
     transition: opacity 1.5s;
   }
 </style>

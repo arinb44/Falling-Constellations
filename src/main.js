@@ -4,12 +4,16 @@ import { buildGalaxy, drawGalaxy } from './galaxy/canvas2d.js';
 import { buildStars, drawStars } from './starfield.js';
 import { makeConstellation, targetCount, drawConstellation } from './constellation.js';
 import { maybeShoot, drawShooters } from './shooters.js';
+import { buildSprites } from './sprites.js';
 import { createFrameStats, mountReadout } from './debug.js';
 
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
 const hint = document.getElementById('hint');
 const view = { W: 0, H: 0, DPR: 1 };
+
+/* ---------- Atlas look: star sprites drawn once ---------- */
+const look = { sprites: buildSprites() };
 
 let cons = [];
 function populate() {
@@ -61,7 +65,7 @@ function frame() {
   const autoCount = cons.filter(c => c.vy).length;
   if (autoCount < targetCount(view) && Math.random() < dt * 2.2) cons.push(makeConstellation(rand(80, W - 80), 0, true));
 
-  for (const c of cons) drawConstellation(ctx, view, c, t, dt, mouse);
+  for (const c of cons) drawConstellation(ctx, view, c, t, dt, mouse, look);
   maybeShoot(view, dt); drawShooters(ctx, dt);
 
   if (stats && stats.add(raw)) {

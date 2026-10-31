@@ -13,8 +13,8 @@ Numbers in brackets are the report's upgrade numbers.
 2. **Dev readout:** a frame-time readout, shown only with `?debug` in the URL (report next step 1).
 3. **[1] Atlas restyle:** one cream/gold ink with slight variation replaces `HUES`; 3–4 graded star size classes; lines about 0.75–1 px, pale gold, low opacity, round caps, with a small gap where a line meets a star.
 4. **[2] Star sprites:** 3–4 glow sprites pre-rendered once to offscreen canvases; stars drawn with `drawImage`; no `createRadialGradient` per frame.
-5. **[3] Typography:** EB Garamond small caps with wide tracking; drawing waits for `document.fonts.load`; `ctx.letterSpacing` with manual spacing fallback; a serif fallback if the font cannot load.
-6. **[4] Draw-in and fades:** easeInOutCubic per edge with slight overlap; each star appears just before its line arrives; figures take 2–4 s; eased fade-out near the bottom.
+5. **[3] Typography:** *(changed 2026-10-31: constellation names removed at the user's request; only the hint text uses the font)* EB Garamond small caps with wide tracking; drawing waits for `document.fonts.load`; `ctx.letterSpacing` with manual spacing fallback; a serif fallback if the font cannot load.
+6. **[4] Draw-in and fades:** *(changed 2026-10-31 at the user's request: stars fade in one by one first; lines start only once every star is on screen; built in M1)* easeInOutCubic per edge with slight overlap; each star appears just before its line arrives; figures take 2–4 s; eased fade-out near the bottom.
 7. **[5] Zero allocation per frame:** projected points, gradients and constellations reused or pooled; `autoCount` fixed with an `isAuto` flag.
 8. **[6] Resize and lifecycle:** resize rescales buffers without calling `populate()`; the loop pauses on `visibilitychange`.
 9. **[7] WebGL2 galaxy layer:** opaque WebGL2 canvas (`alpha: false`) behind a transparent 2D canvas; star data in one static buffer; instanced quads with a glow sprite; one draw call; 50k+ stars. Replaces `buildGalaxy` / `drawGalaxy`.

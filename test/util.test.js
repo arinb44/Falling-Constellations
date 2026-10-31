@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { rand, randInt, pick, clamp01, smooth, gauss } from '../src/util.js';
+import { rand, randInt, pick, clamp01, smooth, gauss, easeInOutCubic } from '../src/util.js';
 
 test('rand stays in [a, b)', () => {
   for (let i = 0; i < 1000; i++) {
@@ -35,4 +35,15 @@ test('gauss is centred on zero within [-1, 1]', () => {
   let sum = 0;
   for (let i = 0; i < 20000; i++) { const g = gauss(); expect(Math.abs(g)).toBeLessThanOrEqual(1); sum += g; }
   expect(Math.abs(sum / 20000)).toBeLessThan(0.02);
+});
+
+test('easeInOutCubic clamps, is symmetric and monotonic', () => {
+  expect(easeInOutCubic(-1)).toBe(0);
+  expect(easeInOutCubic(0)).toBe(0);
+  expect(easeInOutCubic(0.5)).toBeCloseTo(0.5);
+  expect(easeInOutCubic(1)).toBe(1);
+  expect(easeInOutCubic(2)).toBe(1);
+  expect(easeInOutCubic(0.2) + easeInOutCubic(0.8)).toBeCloseTo(1);
+  let prev = -1;
+  for (let x = 0; x <= 1; x += 0.01) { const v = easeInOutCubic(x); expect(v).toBeGreaterThanOrEqual(prev); prev = v; }
 });
