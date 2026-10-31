@@ -24,7 +24,8 @@ let rebakeTimer = 0;
 // Without WebGL2 the far field and starfield fall back to the 2D canvas, with no galaxy.
 let back = null;
 const params = new URLSearchParams(location.search);
-try { if (!params.has('nogl')) back = createBackLayer(document.getElementById('gl'), field); }   // ?nogl: test the fallback
+// dev flags: ?nogl tests the 2D fallback, ?ldr tests the 8-bit (no half-float) path
+try { if (!params.has('nogl')) back = createBackLayer(document.getElementById('gl'), field, { forceLDR: params.has('ldr') }); }
 catch (err) { console.error(err); }
 
 // Sim clock: advances by the clamped dt, so a paused or backgrounded tab
@@ -105,7 +106,7 @@ function frame(now) {
 
   if (stats && stats.add(Math.max(0, raw))) {
     const o = stats.out;
-    readout.textContent = `${o.fps.toFixed(0)} fps  avg ${o.avgMs.toFixed(1)} ms  worst ${o.worstMs.toFixed(1)} ms\n${cons.length} constellations  ${W}×${H} @${view.DPR}x\nfield bake ${field.w}×${field.h} in ${field.bakeMs.toFixed(0)} ms  ${back ? 'WebGL2' : '2D fallback'}`;
+    readout.textContent = `${o.fps.toFixed(0)} fps  avg ${o.avgMs.toFixed(1)} ms  worst ${o.worstMs.toFixed(1)} ms\n${cons.length} constellations  ${W}×${H} @${view.DPR}x\nfield bake ${field.w}×${field.h} in ${field.bakeMs.toFixed(0)} ms  ${back ? `WebGL2 ${back.hdr ? 'HDR' : 'LDR'} bloom×${back.bloomLevels()}` : '2D fallback'}`;
   }
   rafId = requestAnimationFrame(frame);
 }

@@ -16,7 +16,7 @@ export const NEBULA_COLOURS = [
   [150, 72, 104],    // dusty rose
   [40, 104, 128]     // teal
 ];
-export const NEBULA_PEAK = 115;                // brightest channel value of one cloud; keeps them faint
+export const NEBULA_PEAK = 85;                 // brightest channel value of one cloud; keeps them faint
 const PEAK_SCALE = NEBULA_PEAK / Math.max(...NEBULA_COLOURS.flat());
 
 // Clouds sit on a ring around the galaxy, one per equal sector (with some jitter), so they

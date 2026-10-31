@@ -19,7 +19,8 @@ export const G = {
   BULGE: 0.14,           // fraction of stars in the central bulge
   SCATTER: 0.02,         // per-star offset from its ideal ellipse (disc units); softens the arms
   CORE_DIM: 0.5,         // stars dim to 50% of their brightness as they reach the centre
-  CORE_DIM_R: 0.22       // ...starting from this radius (disc units)
+  CORE_DIM_R: 0.22,      // ...starting from this radius (disc units)
+  GAIN: 0.55             // overall galaxy brightness (stars and core glow), so the constellations stay on top
 };
 
 const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -77,7 +78,8 @@ export function buildStars(seed = 1, n = G.N) {
     data[o + 1] = rng() * Math.PI * 2;
     data[o + 2] = big ? 2.2 + rng() * 1.4 : 0.7 + rng() * 1.1;            // CSS px
     data[o + 3] = col[0]; data[o + 4] = col[1]; data[o + 5] = col[2];
-    data[o + 6] = (bulge ? 0.07 : young ? 0.32 : 0.15) * (0.5 + rng()) * (big ? 1.6 : 1);
+    // full brightness: overlapping stars add up past 1 in the HDR target and ACES rolls them off
+    data[o + 6] = (bulge ? 0.14 : young ? 0.64 : 0.30) * (0.5 + rng()) * (big ? 1.6 : 1) * G.GAIN;
     data[o + 7] = young;
     // without scatter every star sits exactly on its ellipse and crowded arms collapse into a hard line
     const sc = G.SCATTER * (0.4 + a);

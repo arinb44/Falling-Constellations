@@ -40,7 +40,7 @@ uniform float u_radius;
 out vec4 o;
 void main() {
   float d = length(v_px - u_view * 0.5) / (u_radius * 0.38);
-  float g = (exp(-d * d * 2.2) * 0.12 + exp(-d * d * 18.0) * 0.1) * ${f(G.CORE_DIM)};   // same cut as the stars
+  float g = (exp(-d * d * 2.2) * 0.12 + exp(-d * d * 18.0) * 0.1) * ${f(G.CORE_DIM * G.GAIN)};   // same cut and gain as the stars
   o = vec4(vec3(1.0, 0.86, 0.66) * g, 0.0);   // premultiplied, additive
 }`;
 
@@ -154,3 +154,88 @@ void main() {
   float k = exp(-d * 9.0) + 0.12 * exp(-d * 2.5);
   o = vec4(v_col * k, 0.0);
 }`;
+
+/* ---------- post: bloom chain and filmic tone map ---------- */
+// Narkowicz's ACES fit, applied straight to the scene values at exposure 1: faint values stay
+// close to where they were authored (0.08 → 0.09), highlights roll off (1 → 0.80, 6 → 0.99).
+export const POST = {
+  EXPOSURE: 1.0,
+  BLOOM: 0.05,           // share of the bloom chain added before tone mapping (the chain sums ~6 levels)
+  BLOOM_RADIUS: 1.0,     // tent-filter radius in texels when upsampling
+  MIN_LEVEL: 8           // stop halving once a level's short side would drop below this
+};
+export const aces = x => Math.min(1, Math.max(0, (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14)));
+
+const POST_VS = `#version 300 es
+layout(location = 0) in vec2 corner;
+out vec2 v_uv;
+void main() { v_uv = corner * 0.5 + 0.5; gl_Position = vec4(corner, 0.0, 1.0); }`;
+export { POST_VS };
+
+// 13-tap downsample (Jimenez, SIGGRAPH 2014). On the first step each 2×2 group is weighted by
+// 1 / (1 + luma) (Karis average), so a single very bright pixel can't flicker the bloom.
+export const DOWN_FS = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_src;
+uniform vec2 u_texel;
+uniform bool u_karis;
+out vec4 o;
+vec3 s(vec2 off) { return texture(u_src, v_uv + off * u_texel).rgb; }
+float w(vec3 c) { return 1.0 / (1.0 + dot(c, vec3(0.2126, 0.7152, 0.0722))); }
+void main() {
+  vec3 a = s(vec2(-2, 2)), b = s(vec2(0, 2)), c = s(vec2(2, 2));
+  vec3 d = s(vec2(-2, 0)), e = s(vec2(0, 0)), f = s(vec2(2, 0));
+  vec3 g = s(vec2(-2, -2)), h = s(vec2(0, -2)), i = s(vec2(2, -2));
+  vec3 j = s(vec2(-1, 1)), k = s(vec2(1, 1)), l = s(vec2(-1, -1)), m = s(vec2(1, -1));
+  vec3 g0 = (j + k + l + m) * 0.25;
+  vec3 g1 = (a + b + d + e) * 0.25, g2 = (b + c + e + f) * 0.25;
+  vec3 g3 = (d + e + g + h) * 0.25, g4 = (e + f + h + i) * 0.25;
+  vec4 wt = vec4(0.125);
+  float w0 = 0.5;
+  if (u_karis) { w0 *= w(g0); wt *= vec4(w(g1), w(g2), w(g3), w(g4)); }
+  vec3 sum = g0 * w0 + g1 * wt.x + g2 * wt.y + g3 * wt.z + g4 * wt.w;
+  o = vec4(sum / (w0 + wt.x + wt.y + wt.z + wt.w), 1.0);
+}`;
+
+// 3×3 tent upsample, added onto the next larger level.
+export const UP_FS = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_src;
+uniform vec2 u_texel;
+uniform float u_radius;
+out vec4 o;
+vec3 s(vec2 off) { return texture(u_src, v_uv + off * u_texel * u_radius).rgb; }
+void main() {
+  vec3 sum = s(vec2(0, 0)) * 4.0
+    + (s(vec2(-1, 0)) + s(vec2(1, 0)) + s(vec2(0, -1)) + s(vec2(0, 1))) * 2.0
+    + s(vec2(-1, -1)) + s(vec2(1, -1)) + s(vec2(-1, 1)) + s(vec2(1, 1));
+  o = vec4(sum / 16.0, 1.0);
+}`;
+
+export const FINAL_FS = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_scene;
+uniform sampler2D u_bloom;
+uniform float u_bloomStrength;
+uniform float u_exposure;
+out vec4 o;
+vec3 aces(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
+void main() {
+  vec3 c = texture(u_scene, v_uv).rgb + texture(u_bloom, v_uv).rgb * u_bloomStrength;
+  o = vec4(aces(c * u_exposure), 1.0);
+}`;
+
+// Bloom level sizes: halve from the scene size until the short side would drop below MIN_LEVEL.
+export function bloomLevels(w, h, min = POST.MIN_LEVEL, max = 6) {
+  const out = [];
+  let lw = w, lh = h;
+  while (out.length < max) {
+    lw = Math.max(1, Math.floor(lw / 2)); lh = Math.max(1, Math.floor(lh / 2));
+    if (Math.min(lw, lh) < min) break;
+    out.push([lw, lh]);
+  }
+  return out;
+}

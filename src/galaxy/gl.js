@@ -1,4 +1,5 @@
 /* ---------- WebGL2 back layer: far field, background stars, galaxy ---------- */
+// Everything below is drawn into an HDR target (post.js), then bloomed and tone mapped.
 // Draw order, far to near: background → nebulae → clusters and distant galaxies →
 // background stars → dark dust → galaxy core glow → galaxy stars. Everything is additive
 // (premultiplied, ONE/ONE) except the dust, which is black with alpha (ONE/ONE_MINUS_SRC_ALPHA).
@@ -6,6 +7,7 @@ import * as S from './shaders.js';
 import { G, STRIDE, buildStars as buildGalaxyStars } from './model.js';
 import { FIELD_MARGIN, fieldOrigin, pulse } from '../sky/field.js';
 import { mulberry32 } from '../sky/noise.js';
+import { createPost } from './post.js';
 
 const STAR_STRIDE = 7;   // background stars: u, v0, size, speed, phase, twinkle, (pad)
 
@@ -38,7 +40,7 @@ export function fieldStarData(count, seed) {
   return d;
 }
 
-export function createBackLayer(canvas, field) {
+export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
   const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: false });
   if (!gl) return null;
 
@@ -58,6 +60,8 @@ export function createBackLayer(canvas, field) {
   // fullscreen + single-rect passes share one VAO
   const quadVao = gl.createVertexArray();
   gl.bindVertexArray(quadVao); withQuad();
+  const drawQuad = () => { gl.bindVertexArray(quadVao); gl.drawArrays(gl.TRIANGLES, 0, 6); };
+  const post = createPost(gl, compile, drawQuad, forceLDR);
 
   // galaxy: static instance buffer, uploaded once
   const galaxyData = buildGalaxyStars(field.seed);
@@ -105,7 +109,7 @@ export function createBackLayer(canvas, field) {
   function resize(W, H, DPR) {
     view.W = W; view.H = H; view.DPR = DPR;
     canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
-    gl.viewport(0, 0, canvas.width, canvas.height);
+    post.resize(canvas.width, canvas.height);
     const n = Math.floor(W * H / 5500);
     if (n !== starCount) {
       gl.bindBuffer(gl.ARRAY_BUFFER, sbuf);
@@ -132,6 +136,7 @@ export function createBackLayer(canvas, field) {
       bakedVersion = field.version;
     }
 
+    post.begin();
     gl.disable(gl.BLEND);
     gl.bindVertexArray(quadVao);
     gl.useProgram(progs.bg.prog);
@@ -183,8 +188,10 @@ export function createBackLayer(canvas, field) {
     gl.uniform1f(progs.galaxy.u.u_radius, R);
     gl.uniform1f(progs.galaxy.u.u_dpr, DPR);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, G.N);
+
+    post.finish(canvas.width, canvas.height);
     gl.bindVertexArray(null);
   }
 
-  return { gl, resize, draw, starCount: () => starCount };
+  return { gl, resize, draw, starCount: () => starCount, hdr: post.hdr, bloomLevels: post.levelCount };
 }

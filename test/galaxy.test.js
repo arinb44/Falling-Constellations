@@ -1,6 +1,6 @@
 import { test, expect } from 'bun:test';
 import { G, orbit, project, eccentricity, tilt, omega, armness, centreDim, buildStars, STRIDE, COLOURS } from '../src/galaxy/model.js';
-import { GALAXY_VS } from '../src/galaxy/shaders.js';
+import { GALAXY_VS, CORE_FS } from '../src/galaxy/shaders.js';
 import { fieldStarData } from '../src/galaxy/gl.js';
 
 const N = 120000;
@@ -107,4 +107,12 @@ test('stars dim by 50% as they reach the centre, and not at all outside it', () 
   expect(centreDim(0.6)).toBe(1);
   let prev = 0;
   for (let r = 0; r <= 0.3; r += 0.01) { const v = centreDim(r); expect(v).toBeGreaterThanOrEqual(prev); prev = v; }
+});
+
+test('galaxy gain scales every star and the core glow', () => {
+  const d = buildStars(5, 4000);
+  let max = 0;
+  for (let i = 0; i < 4000; i++) max = Math.max(max, d[i * STRIDE + 6]);
+  expect(max).toBeLessThanOrEqual(0.64 * 1.5 * 1.6 * G.GAIN + 1e-9);   // brightest possible: young, big
+  expect(CORE_FS).toContain(String(G.CORE_DIM * G.GAIN));
 });
