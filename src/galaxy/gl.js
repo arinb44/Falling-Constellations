@@ -1,13 +1,15 @@
 /* ---------- WebGL2 back layer: far field, background stars, galaxy ---------- */
 // Everything below is drawn into an HDR target (post.js), then bloomed and tone mapped.
 // Draw order, far to near: background → nebulae → clusters and distant galaxies →
-// background stars → dark dust → galaxy core glow → galaxy stars. Everything is additive
-// (premultiplied, ONE/ONE) except the dust, which is black with alpha (ONE/ONE_MINUS_SRC_ALPHA).
+// background stars → dark dust → galaxy core glow → galaxy gas → galaxy stars → galaxy dust →
+// H-II knots. Everything is additive (premultiplied, ONE/ONE) except the two dust layers,
+// which are black with alpha (ONE/ONE_MINUS_SRC_ALPHA).
 import * as S from './shaders.js';
 import { G, STRIDE, buildStars as buildGalaxyStars } from './model.js';
 import { FIELD_MARGIN, fieldOrigin, pulse } from '../sky/field.js';
 import { mulberry32 } from '../sky/noise.js';
 import { createPost } from './post.js';
+import { S as SX, bakeStructure } from './structure.js';
 
 const STAR_STRIDE = 7;   // background stars: u, v0, size, speed, phase, twinkle, (pad)
 
@@ -49,7 +51,9 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     core: compile(gl, S.FULLSCREEN_VS, S.CORE_FS),
     rect: compile(gl, S.RECT_VS, S.RECT_FS),
     stars: compile(gl, S.FIELDSTAR_VS, S.FIELDSTAR_FS),
-    galaxy: compile(gl, S.GALAXY_VS, S.GALAXY_FS)
+    galaxy: compile(gl, S.GALAXY_VS, S.GALAXY_FS),
+    disc: compile(gl, S.DISC_VS, S.DISC_FS),
+    knots: compile(gl, S.KNOT_VS, S.GALAXY_FS)
   };
 
   const quad = gl.createBuffer();
@@ -74,6 +78,30 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
   for (const [loc, size, off] of [[1, 3, 0], [2, 3, 3], [3, 2, 6], [4, 2, 8]]) {
     gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, size, gl.FLOAT, false, gs, off * 4); gl.vertexAttribDivisor(loc, 1);
   }
+
+  // arm structure: baked once in the pattern frame (structure.js), only rotated per frame
+  const structure = bakeStructure(galaxyData, field.seed);
+  const knotCount = structure.knots.length / SX.KNOT_STRIDE;
+  const knotVao = gl.createVertexArray();
+  gl.bindVertexArray(knotVao); withQuad();
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  gl.bufferData(gl.ARRAY_BUFFER, structure.knots, gl.STATIC_DRAW);
+  for (const [loc, off] of [[1, 0], [2, 3]]) {
+    gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, SX.KNOT_STRIDE * 4, off * 4); gl.vertexAttribDivisor(loc, 1);
+  }
+  // half-float so the faint gas doesn't band; float data must not be premultiplied on upload
+  const floatTexture = data => {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, structure.n, structure.n, 0, gl.RGBA, gl.FLOAT, data);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
+  };
+  const gasTex = floatTexture(structure.gas), galaxyDustTex = floatTexture(structure.dust);
 
   // background stars: instance buffer rebuilt when the window size changes the count
   const starVao = gl.createVertexArray();
@@ -122,6 +150,20 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     const p = progs.rect;
     gl.uniform4f(p.u.u_rect, x, y, w, h);
     gl.uniform1f(p.u.u_alpha, alpha);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
+  // one baked layer on the rotating galaxy plane
+  function disc(tex, t, R) {
+    const p = progs.disc;
+    gl.bindVertexArray(quadVao);
+    gl.useProgram(p.prog);
+    gl.uniform2f(p.u.u_view, view.W, view.H);
+    gl.uniform1f(p.u.u_time, t);
+    gl.uniform1f(p.u.u_radius, R);
+    gl.uniform1f(p.u.u_ext, SX.EXT);
+    gl.uniform1f(p.u.u_gain, 1);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
@@ -180,6 +222,7 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     gl.uniform2f(progs.core.u.u_view, W, H);
     gl.uniform1f(progs.core.u.u_radius, R);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+    disc(gasTex, t, R);
 
     gl.bindVertexArray(galaxyVao);
     gl.useProgram(progs.galaxy.prog);
@@ -188,6 +231,18 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     gl.uniform1f(progs.galaxy.u.u_radius, R);
     gl.uniform1f(progs.galaxy.u.u_dpr, DPR);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, G.N);
+
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    disc(galaxyDustTex, t, R);
+    gl.blendFunc(gl.ONE, gl.ONE);
+
+    gl.bindVertexArray(knotVao);
+    gl.useProgram(progs.knots.prog);
+    gl.uniform2f(progs.knots.u.u_view, W, H);
+    gl.uniform1f(progs.knots.u.u_time, t);
+    gl.uniform1f(progs.knots.u.u_radius, R);
+    gl.uniform1f(progs.knots.u.u_dpr, DPR);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, knotCount);
 
     post.finish(canvas.width, canvas.height);
     gl.bindVertexArray(null);

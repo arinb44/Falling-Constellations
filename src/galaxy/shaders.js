@@ -155,6 +155,61 @@ void main() {
   o = vec4(v_col * k, 0.0);
 }`;
 
+/* ---------- galaxy structure: baked gas and dust, H-II knots ---------- */
+// Baked in the frame that turns with the arm pattern, so here they only rotate by PATTERN·t
+// and then get the same squash and view rotation as the stars.
+const planeToScreen = `
+const float PATTERN = ${f(G.PATTERN)}, VIEW_ROT = ${f(G.VIEW_ROT)}, SQUASH = ${f(G.SQUASH)};
+vec2 planeToScreen(vec2 q) {
+  float a = PATTERN * u_time;
+  vec2 p = vec2(q.x * cos(a) - q.y * sin(a), q.x * sin(a) + q.y * cos(a));
+  p.y *= SQUASH;
+  p = vec2(p.x * cos(VIEW_ROT) - p.y * sin(VIEW_ROT), p.x * sin(VIEW_ROT) + p.y * cos(VIEW_ROT));
+  return u_view * 0.5 + p * u_radius;
+}`;
+
+export const DISC_VS = `#version 300 es
+layout(location = 0) in vec2 corner;
+uniform vec2 u_view;
+uniform float u_time;
+uniform float u_radius;
+uniform float u_ext;          // half-size of the baked square, in disc radii
+out vec2 v_uv;
+${toClip}
+${planeToScreen}
+void main() {
+  v_uv = corner * 0.5 + 0.5;   // row 0 of the bake is y = -ext
+  gl_Position = toClip(planeToScreen(corner * u_ext));
+}`;
+
+export const DISC_FS = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform float u_gain;
+out vec4 o;
+void main() { o = texture(u_tex, v_uv) * u_gain; }`;
+
+// per instance: plane position, size (CSS px), colour
+export const KNOT_VS = `#version 300 es
+layout(location = 0) in vec2 corner;
+layout(location = 1) in vec3 pos;        // x, y, size
+layout(location = 2) in vec3 colour;
+uniform vec2 u_view;
+uniform float u_time;
+uniform float u_radius;
+uniform float u_dpr;
+out vec2 v_c;
+out vec3 v_col;
+${toClip}
+${planeToScreen}
+void main() {
+  float r = max(pos.z, 1.2 / u_dpr) * 1.6;
+  v_c = corner;
+  v_col = colour;
+  gl_Position = toClip(planeToScreen(pos.xy) + corner * r);
+}`;
+
 /* ---------- post: bloom chain and filmic tone map ---------- */
 // Narkowicz's ACES fit, applied straight to the scene values at exposure 1: faint values stay
 // close to where they were authored (0.08 → 0.09), highlights roll off (1 → 0.80, 6 → 0.99).
@@ -162,7 +217,15 @@ export const POST = {
   EXPOSURE: 1.0,
   BLOOM: 0.05,           // share of the bloom chain added before tone mapping (the chain sums ~6 levels)
   BLOOM_RADIUS: 1.0,     // tent-filter radius in texels when upsampling
-  MIN_LEVEL: 8           // stop halving once a level's short side would drop below this
+  MIN_LEVEL: 8,          // stop halving once a level's short side would drop below this
+  SATURATION: 0.88,      // grading after the tone map, so the Atlas ink reads on top
+  BRIGHTNESS: 0.96
+};
+const LUMA = 'vec3(0.2126, 0.7152, 0.0722)';
+// the same grade in JS, for tests: c is a tone-mapped [r, g, b]
+export const grade = c => {
+  const l = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  return c.map(v => (l + (v - l) * POST.SATURATION) * POST.BRIGHTNESS);
 };
 export const aces = x => Math.min(1, Math.max(0, (x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14)));
 
@@ -225,7 +288,9 @@ out vec4 o;
 vec3 aces(vec3 x) { return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0); }
 void main() {
   vec3 c = texture(u_scene, v_uv).rgb + texture(u_bloom, v_uv).rgb * u_bloomStrength;
-  o = vec4(aces(c * u_exposure), 1.0);
+  vec3 m = aces(c * u_exposure);
+  float l = dot(m, ${LUMA});
+  o = vec4((vec3(l) + (m - vec3(l)) * ${f(POST.SATURATION)}) * ${f(POST.BRIGHTNESS)}, 1.0);
 }`;
 
 // Bloom level sizes: halve from the scene size until the short side would drop below MIN_LEVEL.

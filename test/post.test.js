@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { aces, bloomLevels, POST, FINAL_FS, DOWN_FS } from '../src/galaxy/shaders.js';
+import { aces, bloomLevels, grade, POST, FINAL_FS, DOWN_FS } from '../src/galaxy/shaders.js';
 
 test('aces maps 0 to 0, stays in [0, 1] and never decreases', () => {
   expect(aces(0)).toBe(0);
@@ -40,4 +40,14 @@ test('bloom levels stop before the short side drops below the minimum', () => {
 test('bloom levels are capped and empty for a tiny scene', () => {
   expect(bloomLevels(8000, 8000).length).toBe(6);
   expect(bloomLevels(12, 12)).toEqual([]);
+});
+
+test('grading pulls saturation and brightness down a little and keeps greys grey', () => {
+  const [r, g, b] = grade([0.9, 0.5, 0.2]);
+  expect(r - b).toBeLessThan(0.9 - 0.2);                 // less saturated
+  expect(r).toBeLessThan(0.9);
+  const grey = grade([0.5, 0.5, 0.5]);
+  expect(grey[0]).toBeCloseTo(0.5 * POST.BRIGHTNESS);
+  expect(grey[0]).toBeCloseTo(grey[2]);
+  expect(FINAL_FS).toContain(String(POST.SATURATION));
 });
