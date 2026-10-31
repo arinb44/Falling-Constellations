@@ -42,9 +42,19 @@ export function fieldStarData(count, seed) {
   return d;
 }
 
+// CPU-side data depends only on the seed; kept so a restored context rebuilds without re-baking
+const cache = new Map();
+function cpuData(seed) {
+  if (!cache.has(seed)) {
+    const stars = buildGalaxyStars(seed);
+    cache.set(seed, { stars, structure: bakeStructure(stars, seed) });
+  }
+  return cache.get(seed);
+}
+
 export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
   const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: false });
-  if (!gl) return null;
+  if (!gl || gl.isContextLost()) return null;
 
   const progs = {
     bg: compile(gl, S.FULLSCREEN_VS, S.BG_FS),
@@ -68,7 +78,7 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
   const post = createPost(gl, compile, drawQuad, forceLDR);
 
   // galaxy: static instance buffer, uploaded once
-  const galaxyData = buildGalaxyStars(field.seed);
+  const { stars: galaxyData, structure } = cpuData(field.seed);
   const galaxyVao = gl.createVertexArray();
   gl.bindVertexArray(galaxyVao); withQuad();
   const gbuf = gl.createBuffer();
@@ -80,7 +90,6 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
   }
 
   // arm structure: baked once in the pattern frame (structure.js), only rotated per frame
-  const structure = bakeStructure(galaxyData, field.seed);
   const knotCount = structure.knots.length / SX.KNOT_STRIDE;
   const knotVao = gl.createVertexArray();
   gl.bindVertexArray(knotVao); withQuad();
@@ -132,12 +141,16 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
   let cloudTex = [], dustTex = null, bakedVersion = 0;
 
   const view = { W: 0, H: 0, DPR: 1 };
+  // quality: resolution scale (on top of the phone base scale), share of galaxy stars, bloom levels
+  const quality = { scale: 1, stars: 1, bloom: 6 };
   const origin = { x: 0, y: 0 };
 
+  // DPR here is the layer's own: device DPR × phone base scale; quality.scale is applied on top
   function resize(W, H, DPR) {
     view.W = W; view.H = H; view.DPR = DPR;
-    canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
-    post.resize(canvas.width, canvas.height);
+    const d = DPR * quality.scale;
+    canvas.width = Math.max(1, Math.round(W * d)); canvas.height = Math.max(1, Math.round(H * d));
+    post.resize(canvas.width, canvas.height, quality.bloom);
     const n = Math.floor(W * H / 5500);
     if (n !== starCount) {
       gl.bindBuffer(gl.ARRAY_BUFFER, sbuf);
@@ -168,8 +181,14 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     gl.drawArrays(gl.TRIANGLES, 0, 6);
   }
 
+  function setQuality(rung) {
+    Object.assign(quality, rung);
+    if (view.W) resize(view.W, view.H, view.DPR);
+  }
+
   function draw(t) {
-    const { W, H, DPR } = view;
+    if (gl.isContextLost()) return;
+    const { W, H } = view, DPR = view.DPR * quality.scale;
     // the bake is redone after resizes; pick up new images when they change
     if (field.version !== bakedVersion) {
       for (const t of cloudTex) gl.deleteTexture(t);
@@ -230,7 +249,9 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     gl.uniform1f(progs.galaxy.u.u_time, t);
     gl.uniform1f(progs.galaxy.u.u_radius, R);
     gl.uniform1f(progs.galaxy.u.u_dpr, DPR);
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, G.N);
+    // fewer stars: the remaining ones get brighter by 1/√share, so the galaxy dims only a little
+    gl.uniform1f(progs.galaxy.u.u_boost, 1 / Math.sqrt(quality.stars));
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, Math.round(G.N * quality.stars));
 
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     disc(galaxyDustTex, t, R);
@@ -248,5 +269,5 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     gl.bindVertexArray(null);
   }
 
-  return { gl, resize, draw, starCount: () => starCount, hdr: post.hdr, bloomLevels: post.levelCount };
+  return { gl, resize, draw, setQuality, quality, starCount: () => starCount, hdr: post.hdr, bloomLevels: post.levelCount };
 }

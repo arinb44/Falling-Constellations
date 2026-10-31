@@ -28,3 +28,4 @@
 | 2026-10-31 | Shooting stars (request: "bright blue streak and make the trail last for a little bit before fading out directionally"; new scope beyond the report) | Blue glow + pale-blue core + bright head; head flies 0.8 s, each point of the trail stays 1.0 s after the head passes, so the trail fades from its far end toward the head and outlives the head (`trailSpan` in `src/shooters.js`) |
 | 2026-10-31 | Milestone 4 and shooting-star commits | Two commits: `f0b75d1` (Milestone 4) and `a700805` (shooting stars) |
 | 2026-10-31 | Milestone 5 look (dust on inner arm edges, pink H-II knots on outer edges, gas 0.12, grading 0.88 sat / 0.96 brightness) | **Looks good, commit** |
+| 2026-10-31 | Milestone 6 (phone 0.65× DPR, adaptive quality ladder, context-loss rebuild, `#gl` dark background, HANDOFF.md rewrite) | **Commit** |

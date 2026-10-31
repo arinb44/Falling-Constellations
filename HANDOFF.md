@@ -1,8 +1,8 @@
 # Falling Constellations: Handoff
 
-A single-page canvas site. Randomly generated constellations fall down the screen forever over a slowly rotating spiral galaxy. Inspired by [beltoforion/Galaxy-Renderer](https://github.com/beltoforion/Galaxy-Renderer).
+A single-page site. Randomly generated constellations, drawn in the style of an antique star atlas, fall down the screen forever over a slowly turning spiral galaxy. Inspired by [beltoforion/Galaxy-Renderer](https://github.com/beltoforion/Galaxy-Renderer) (inspiration only; no code taken from it).
 
-Current state: a working prototype in one file, `index.html` (vanilla JS, Canvas 2D, no dependencies, no build step). Live preview: https://claude.ai/artifact/SRPqbZqi1V3LD2NQSjr7Qu
+Vanilla JS ES modules, Canvas 2D and raw WebGL2, no dependencies, no build step.
 
 ## Run it
 
@@ -12,7 +12,18 @@ The code is split into ES modules under `src/`, so the folder must be served ove
 bun scripts/serve.js 8000
 ```
 
-`python3 -m http.server 8000` works too. Add `?debug` to the URL for a frame-time readout.
+`python3 -m http.server 8000` works too where it can read the folder.
+
+**Dev flags** (add to the URL):
+
+| Flag | Effect |
+|---|---|
+| `?debug` | Frame-time readout: fps, average and worst frame, view size, field bake time, HDR or LDR, bloom levels, quality rung, WebGL resolution, share of galaxy stars |
+| `?nogl` | Skip WebGL2 and use the 2D fallback (far field and starfield, no galaxy) |
+| `?ldr` | Force the 8-bit render path (as on devices without half-float targets) |
+| `?burn=ms` | Waste that many ms per frame, to watch the quality controller step down |
+
+To test context loss, in the console: `document.getElementById('gl').getContext('webgl2').getExtension('WEBGL_lose_context').loseContext()`, then `.restoreContext()` on the same extension.
 
 ## Test it
 
@@ -20,102 +31,96 @@ bun scripts/serve.js 8000
 bun test
 ```
 
-Unit tests live in `test/` and use Bun's built-in runner; there are no npm dependencies.
+Unit tests live in `test/` and use Bun's built-in runner. They cover the pure logic: easing, the constellation generator, sprites, the far field, the galaxy orbit model (including that the arms never wind up), the arm structure bake, the tone map and bloom sizes, grading, shooting-star trails, and the quality controller. Shaders and the look are checked by eye in a browser.
 
-## Suggested project layout (when you split it up)
+## Layout
 
 ```
-constellations/
-  index.html
-  style.css
-  src/
-    main.js            # loop, resize, input
-    galaxy.js          # background spiral
-    starfield.js       # far twinkling stars
-    constellation.js   # generator + draw
-    shooters.js        # shooting stars
-    util.js            # rand, pick, smooth, gauss
+index.html              page: style, two stacked canvases (#gl behind, #c on top), hint, module script
+scripts/serve.js        Bun static server for local runs
+src/main.js             loop, resize, input, visibility pause, device tuning, context loss, debug readout
+src/util.js             rand, pick, smooth, gauss, easing
+src/debug.js            frame-time stats and readout (?debug)
+src/quality.js          phone base scale and adaptive-quality controller (pure)
+src/sprites.js          pre-rendered star glow sprites, 4 size classes
+src/constellation.js    generator (pure) and Atlas drawing
+src/shooters.js         shooting stars: pooled, blue streaks with a lingering trail
+src/starfield.js        far stars, 2D fallback only
+src/sky/noise.js        seeded RNG (mulberry32), gradient noise, FBM, domain warp
+src/sky/field.js        far field: nebula clouds (pulsing), dark dust, distant galaxies, star clusters
+src/galaxy/model.js     galaxy star data, tilted-ellipse orbits, colours (pure; mirrors the shader)
+src/galaxy/structure.js arm map, dust lanes, gas, H-II knots, baked once (pure)
+src/galaxy/shaders.js   all GLSL sources and post-processing constants
+src/galaxy/post.js      HDR target, bloom chain, tone map and grade
+src/galaxy/gl.js        WebGL2 back layer: setup, buffers, textures, draw order, quality hooks
+test/*.test.js          bun tests
 ```
-
-Suggested commit stages: (1) canvas + loop + resize, (2) starfield, (3) galaxy, (4) constellation generator, (5) constellation rendering + recycling, (6) input + polish.
 
 ## Architecture
 
-One `requestAnimationFrame` loop. Each frame:
+Two layers. The WebGL2 canvas (`#gl`, opaque) draws everything in the background. The transparent 2D canvas (`#c`) on top draws the constellations, shooting stars and nothing else, so the Atlas ink always stays crisp. Without WebGL2 the far field and starfield are drawn on the 2D canvas instead, with no galaxy.
 
-1. Clear to `#02030a`, add a faint top-down purple gradient.
-2. `drawGalaxy(t)`
-3. `drawStars(t, dt)`
-4. Remove constellations that have fallen past `H + 200`. Spawn a new one at the top if the count is below target.
-5. `drawConstellation` for each one (also advances its position).
-6. Shooting stars.
+One `requestAnimationFrame` loop. Motion runs on a sim clock that advances by `dt`, clamped to 0.05 s, and the loop stops while the tab is hidden, so nothing jumps on return. Nothing is allocated per frame in the render loop.
 
-`dt` is clamped to 0.05 s so a backgrounded tab doesn't cause a jump. The canvas is scaled by `devicePixelRatio` (capped at 2) and everything is drawn in CSS pixels.
+**Back layer, far to near** (all drawn into an HDR target):
 
-## Module notes
+1. Background gradient.
+2. Far field: nebula clouds (each pulses on its own timer), distant galaxies, star clusters. All drift slowly together.
+3. Background stars (fall and wrap entirely on the GPU).
+4. Far-field dust, which dims the stars behind it.
+5. Galaxy core glow, then galaxy gas.
+6. Galaxy stars: 60k in one instanced draw.
+7. Galaxy dust lanes, which darken the stars, then pink H-II knots.
 
-### Galaxy (`buildGalaxy`, `drawGalaxy`)
-- 3,200 points. Each stores radius `r = random^1.6` (dense core), an arm index, and a starting angle `theta0 = r*twist + armOffset + gaussianNoise`.
-- Differential rotation: angular speed `omega = 0.22 / (r + 0.12)`, so the inner stars orbit faster. The current angle is `theta0 + t*omega*0.12`.
-- Each star is projected to an ellipse (y squashed by 0.45), then rotated by `tilt = -0.35` rad.
-- Points are bucketed into 4 colours (core warm, mid white, outer blue, rare pink). `fillStyle` is set once per bucket, and `globalCompositeOperation = 'lighter'` gives the additive glow.
-- **Known issue:** the galaxy reads as a narrow S-ribbon, not a full spiral. Likely causes are `twist` and the 0.45 squash being too aggressive, plus a small `jitter`. Try `twist` 3 to 4, a squash of 0.6 to 0.7, and more arm spread.
-- **Closer to the real Galaxy-Renderer:** replace the log-spiral with elliptical orbits whose major axis rotates with radius (density-wave theory), add dust particles, and add pink H-II blobs along the arms. That is the main thing the original does that this doesn't.
+Then bloom (13-tap downsample with a Karis average on the first step, 3×3 tent upsample), Narkowicz ACES tone map, and a slight saturation and brightness pull so the constellations read on top.
 
-### Starfield (`buildStars`, `drawStars`)
-- Count is `W*H/5500`. Stars fall at 2 to 8 px/s, wrap from the bottom to a random x at the top, and twinkle via a per-star sine phase.
+**Render targets.** RGBA16F when `EXT_color_buffer_float` is available and a test framebuffer completes; otherwise RGBA8.
 
-### Constellation generator (`makeConstellation`)
-1. Pick `n` in 5 to 11. Start with a star at (0,0).
-2. Repeatedly pick an existing star, then a random angle and distance (34 to 86 px). Accept if every other star is more than 28 px away (rejection sampling, 400-try guard).
-3. Re-centre on the centroid. Give each star a magnitude (20% bright) and a twinkle phase.
-4. Edges: **Prim's minimum spanning tree**, so it is always connected and never looks tangled. Then add 0 to 2 extra edges between stars under 110 px apart, to make loops.
-5. Per-constellation properties: `depth` (0.55 to 1.35, scales size and speed), `vy = 16 + 30*depth`, sway amplitude, frequency and phase, rotation speed, hue (from a fixed palette), draw-in time, and a generated name.
-6. Name: an optional title (Ursa, Canis, ...) plus a prefix, a vowel cluster and a suffix.
+**Galaxy model.** Every star moves on an ellipse whose long axis turns a little more with radius. Arms appear where neighbouring ellipses crowd together, and because the arm pattern depends only on that tilt, it never winds up. The vertex shader runs the same maths as `model.js`; the constants are pasted into the GLSL from JS so the two cannot drift apart. `G.GAIN` (0.55) sets overall galaxy brightness so it doesn't overpower the constellations.
 
-### Constellation rendering (`drawConstellation`)
-- Position: `y += vy*dt`, `x = baseX + sin(t*freq + phase)*amp + mouseParallax*depth`.
-- Alpha is the minimum of a fade-in at the top, a fade-out near the bottom (`H-160` onward), and a fade-in after birth.
-- Edges grow in sequentially. Edge `i` draws with `e = clamp(progress*numEdges - i, 0, 1)`.
-- Stars are a radial-gradient glow plus a white core, with a sine twinkle.
-- The label is spaced uppercase monospace under the lowest star.
+**Arm structure.** The ellipses are fixed in a frame that turns at `G.PATTERN`. `structure.js` bakes, once at startup and in that frame:
+- an arm map from the real star data
+- dust along each arm's inner edge
+- domain-warped gas
+- 140 H-II knots along the outer edges
 
-### Spawning and the infinite loop
-- `targetCount = max(5, round(W/130))`, which is about 9 on a 1280 px screen.
-- On load, `populate()` scatters constellations at random heights so the screen is never empty.
-- Each frame there is a `dt*2.2` chance of spawning one at `y = -160*depth` while under the target.
-- Click-spawned ones are tracked the same way, so they also get recycled.
-- **Quirk to fix:** the "auto" count is `cons.filter(c => c.vy)`, which matches every constellation, because `vy` is always truthy. Click-spawned ones therefore count toward the target and temporarily suppress auto-spawning. Add an `isAuto` flag if you want them separate.
+The GPU only rotates them.
 
-### Input
-- `mousemove` sets `mouse.px` in -1..1 for horizontal parallax.
-- `pointerdown` spawns a constellation at the cursor.
-- The hint text fades after the first click or 8 seconds.
+**Constellations.** 5–11 stars placed by rejection sampling. A minimum spanning tree plus 0–2 loop edges keeps every figure connected without tangles. One cream/gold ink and 4 graded size classes come from pre-rendered sprites. Lines are thin, engraved-style, with gaps at the stars. Stars fade in one by one; lines ease in once the whole figure is on screen. `targetCount = max(5, round(W / 130))`; click-spawned ones don't count toward it.
 
-## Tunables worth exposing in a UI
+## Device tuning
+
+- **Phones** (coarse pointer and short side under 768 px) draw the WebGL layer at 0.65× DPR. The 2D layer stays at full DPR, capped at 2.
+- **Adaptive quality** (`quality.js`):
+  - **Measuring:** it ignores the first 2 s and averages frame time over 1.5 s windows. Single frames over 0.25 s (tab switches, GC pauses) are ignored.
+  - **Stepping down:** a window slower than 20 ms steps down one rung. The order is resolution (1 → 0.8 → 0.65), then galaxy stars (100% → 60% → 35%, with the remaining stars brightened by 1/√share), then bloom levels (6 → 3 → 0).
+  - **Stepping up:** after 10 s of windows under 17.5 ms it tries one rung up. If that step immediately fails, the wait doubles.
+- **Context loss**: the page keeps running the 2D layer, and on `webglcontextrestored` the back layer is rebuilt. Star data and the structure bake are cached per seed, so the rebuild doesn't recompute them.
+
+## Tunables
 
 | What | Where | Current |
 |---|---|---|
-| Fall speed | `vy = 16 + 30*depth` | 16 to 60 px/s |
+| Galaxy brightness | `G.GAIN` in `galaxy/model.js` | 0.55 |
+| Galaxy shape | `G.TWIST`, `G.E_MAX`, `G.SQUASH`, `G.SCATTER` | 4.2, 0.36, 0.64, 0.02 |
+| Centre dimming | `G.CORE_DIM`, `G.CORE_DIM_R` | 50% inside 0.22 |
+| Dust, gas, knots | `S.DUST`, `S.GAS`, `S.KNOTS` in `galaxy/structure.js` | 0.55, 0.12, 140 |
+| Bloom strength | `POST.BLOOM` in `galaxy/shaders.js` | 0.05 |
+| Grading | `POST.SATURATION`, `POST.BRIGHTNESS` | 0.88, 0.96 |
+| Nebula brightness | `NEBULA_PEAK` in `sky/field.js` | 85 |
+| Nebula pulses | `PULSE` in `sky/field.js` | 2.2× swell, every 7–18 s |
+| Shooting-star trail | `FLIGHT`, `LINGER` in `shooters.js` | 0.8 s, 1.0 s |
+| Fall speed | `vy = 16 + 30*depth` in `constellation.js` | 16 to 60 px/s |
 | Density | `targetCount` (`W/130`) | about 9 |
-| Stars per constellation | `randInt(5, 11)` | 5 to 11 |
-| Extra loop edges | `randInt(0, 2)` | 0 to 2 |
-| Galaxy star count | `GALAXY_N` | 3200 |
-| Galaxy rotation | `t*s.omega*0.12` | slow |
-| Hue palette | `HUES` | 7 hues |
-| Sway | `swayAmp`, `swayFreq` | 8 to 28 px |
+| Quality thresholds | `Q` in `quality.js` | 20 ms down, 17.5 ms up |
 
 ## Ideas for next steps
 
-- Real density-wave galaxy (see above), plus a dust layer using an offscreen canvas with blur.
-- Seeded RNG, so a URL like `?seed=1234` reproduces a sky. Replace `Math.random` with mulberry32.
-- Pause and speed controls, a density slider, and a "calm" mode with fewer shooting stars.
-- Hover a constellation to brighten it and show its name.
-- Performance: pre-render star glow sprites to an offscreen canvas instead of building a `createRadialGradient` per star per frame. Pre-render the galaxy in layers.
-- Optional WebGL or a particle shader if you want 50k or more galaxy stars (this is what makes the original look so dense).
+- Optional Atlas touches from the research: faint diffraction spikes on each figure's brightest star, a faint coordinate grid.
+- Seeded URLs, e.g. `?seed=1234` to reproduce a sky (the RNG is already seeded internally).
 - Respect `prefers-reduced-motion`.
-- Audio: a soft chime when a constellation finishes drawing in.
+- Test on a real phone and a 120 Hz screen. Tuning so far used desktop and emulation only.
 
 ## Sharing and hosting limits
 
-If you republish it as a Claude artifact, only inline scripts and a few CDNs load, and `fetch` to other hosts is blocked. The current page needs none of that. For your own hosting, any static host works (GitHub Pages, Netlify, Vercel).
+If you republish it as a Claude artifact, only inline scripts and a few CDNs load, and `fetch` to other hosts is blocked. The page needs none of that apart from the EB Garamond font from Google Fonts, which falls back to a local serif. For your own hosting, any static host works (GitHub Pages, Netlify, Vercel).

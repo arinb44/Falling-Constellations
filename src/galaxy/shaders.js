@@ -116,6 +116,7 @@ uniform vec2 u_view;
 uniform float u_time;
 uniform float u_radius;                  // disc radius in CSS px
 uniform float u_dpr;
+uniform float u_boost;                   // > 1 when the quality controller draws fewer stars
 out vec2 v_c;
 out vec3 v_col;
 ${toClip}
@@ -135,7 +136,7 @@ void main() {
   p = vec2(p.x * cos(VIEW_ROT) - p.y * sin(VIEW_ROT), p.x * sin(VIEW_ROT) + p.y * cos(VIEW_ROT));
   // young stars only shine near the arm crests, where the ellipses crowd
   float arm = pow(max(0.0, -sin(2.0 * theta)), ARM_SHARP);
-  float b = lum.x * mix(1.0, 0.15 + 1.6 * arm, lum.y) * dim;
+  float b = lum.x * mix(1.0, 0.15 + 1.6 * arm, lum.y) * dim * u_boost;
   float r = max(orb.z, 1.2 / u_dpr) * 1.6;   // quad half-size: room for the soft edge
   v_c = corner;
   v_col = colour * b;

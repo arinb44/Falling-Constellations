@@ -39,10 +39,11 @@ export function createPost(gl, compile, drawQuad, forceLDR = false) {
   }
 
   let scene = null, levels = [];
-  function resize(w, h) {
+  // maxLevels comes from the quality controller; 0 turns bloom off
+  function resize(w, h, maxLevels = 6) {
     free(scene); levels.forEach(free);
     scene = target(w, h, hdr);
-    levels = bloomLevels(w, h).map(([lw, lh]) => target(lw, lh, hdr));
+    levels = bloomLevels(w, h, POST.MIN_LEVEL, maxLevels).map(([lw, lh]) => target(lw, lh, hdr));
   }
 
   // Everything drawn between begin() and finish() lands in the HDR scene target.

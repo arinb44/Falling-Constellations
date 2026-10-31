@@ -7,6 +7,7 @@ import { buildSprites } from './sprites.js';
 import { createField, drawFieldBack, drawFieldDust } from './sky/field.js';
 import { createBackLayer } from './galaxy/gl.js';
 import { createFrameStats, mountReadout } from './debug.js';
+import { baseScale, createQuality } from './quality.js';
 
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
@@ -24,9 +25,26 @@ let rebakeTimer = 0;
 // Without WebGL2 the far field and starfield fall back to the 2D canvas, with no galaxy.
 let back = null;
 const params = new URLSearchParams(location.search);
+const glCanvas = document.getElementById('gl');
 // dev flags: ?nogl tests the 2D fallback, ?ldr tests the 8-bit (no half-float) path
-try { if (!params.has('nogl')) back = createBackLayer(document.getElementById('gl'), field, { forceLDR: params.has('ldr') }); }
-catch (err) { console.error(err); }
+const makeBack = () => {
+  try { return params.has('nogl') ? null : createBackLayer(glCanvas, field, { forceLDR: params.has('ldr') }); }
+  catch (err) { console.error(err); return null; }
+};
+back = makeBack();
+
+/* ---------- device tuning ---------- */
+// Phones draw the WebGL layer below full DPR; the controller steps quality down if frames run slow.
+const phoneScale = () => baseScale({ coarse: matchMedia('(pointer: coarse)').matches, minSide: Math.min(innerWidth, innerHeight) });
+const quality = createQuality();
+const burnMs = Number(params.get('burn')) || 0;   // dev flag: ?burn=ms wastes that long per frame, to test the controller
+
+// Context loss (GPU reset, too many tabs): keep the 2D layer running, rebuild the back layer on restore.
+glCanvas.addEventListener('webglcontextlost', e => { e.preventDefault(); });
+glCanvas.addEventListener('webglcontextrestored', () => {
+  back = makeBack();
+  if (back) { back.setQuality(quality.rung); back.resize(view.W, view.H, view.DPR * phoneScale()); }
+});
 
 // Sim clock: advances by the clamped dt, so a paused or backgrounded tab
 // resumes exactly where it left off instead of jumping ahead.
@@ -51,7 +69,7 @@ function resize() {
   view.W = innerWidth; view.H = innerHeight;
   canvas.width = view.W * view.DPR; canvas.height = view.H * view.DPR;
   ctx.setTransform(view.DPR, 0, 0, view.DPR, 0, 0);
-  if (back) back.resize(view.W, view.H, view.DPR);
+  if (back) back.resize(view.W, view.H, view.DPR * phoneScale());
   else fitStars(view, prevW, prevH);
   // keep the sky: constellations slide to the same relative x instead of regenerating
   if (prevW > 0) for (const c of cons) c.baseX *= view.W / prevW;
@@ -104,9 +122,13 @@ function frame(now) {
   for (let i = 0; i < cons.length; i++) drawConstellation(ctx, view, cons[i], t, dt, mouse, look);
   maybeShoot(view, dt); drawShooters(ctx, view, dt);
 
+  if (burnMs) { const end = performance.now() + burnMs; while (performance.now() < end); }
+  if (back && quality.update(Math.max(0, raw))) back.setQuality(quality.rung);
+
   if (stats && stats.add(Math.max(0, raw))) {
     const o = stats.out;
-    readout.textContent = `${o.fps.toFixed(0)} fps  avg ${o.avgMs.toFixed(1)} ms  worst ${o.worstMs.toFixed(1)} ms\n${cons.length} constellations  ${W}×${H} @${view.DPR}x\nfield bake ${field.w}×${field.h} in ${field.bakeMs.toFixed(0)} ms  ${back ? `WebGL2 ${back.hdr ? 'HDR' : 'LDR'} bloom×${back.bloomLevels()}` : '2D fallback'}`;
+    readout.textContent = `${o.fps.toFixed(0)} fps  avg ${o.avgMs.toFixed(1)} ms  worst ${o.worstMs.toFixed(1)} ms\n${cons.length} constellations  ${W}×${H} @${view.DPR}x\nfield bake ${field.w}×${field.h} in ${field.bakeMs.toFixed(0)} ms  ${back ? `WebGL2 ${back.hdr ? 'HDR' : 'LDR'} bloom×${back.bloomLevels()}` : '2D fallback'}` +
+      (back ? `\nquality ${quality.level}  gl ${(view.DPR * phoneScale() * back.quality.scale).toFixed(2)}x  stars ${Math.round(back.quality.stars * 100)}%` : '');
   }
   rafId = requestAnimationFrame(frame);
 }
