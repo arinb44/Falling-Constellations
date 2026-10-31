@@ -22,3 +22,7 @@
 | 2026-10-31 | Galaxy centre brightness (feedback: "tone it down once it reaches the center by 20%") | Stars ease down to 80% brightness inside radius 0.22; core glow cut by the same 20% |
 | 2026-10-31 | Galaxy centre, second pass (feedback: "still too bright, make it 50%") | **50%**: stars ease down to half brightness at the centre; core glow halved |
 | 2026-10-31 | Nebula pulses (request: "pulse, so it becomes bright in random intervals") | Each cloud baked separately and pulsed on its own timer: swells to 2.2× over 1.2 s, settles over ~3.5 s, every 7–18 s at random; first pulses staggered |
+| 2026-10-31 | Milestone 3 commit | Committed as `cfd0cab` and pushed |
+| 2026-10-31 | Resume: partial Milestone 4 found uncommitted. Options: keep and finish, or discard and restart. | **Keep and finish it** |
+| 2026-10-31 | Galaxy vs constellations (feedback: "the galaxy overpowers the constellations"). Options: dim the galaxy only, brighten the constellations, both a little, dim the galaxy just behind each figure. Recommended: dim the galaxy. | **Dim the galaxy**: new `G.GAIN` = 0.55 scales every galaxy star and the core glow; far field and constellations unchanged |
+| 2026-10-31 | Shooting stars (request: "bright blue streak and make the trail last for a little bit before fading out directionally"; new scope beyond the report) | Blue glow + pale-blue core + bright head; head flies 0.8 s, each point of the trail stays 1.0 s after the head passes, so the trail fades from its far end toward the head and outlives the head (`trailSpan` in `src/shooters.js`) |
