@@ -1,7 +1,7 @@
 # Progress: Falling Constellations Build
 
 - **Current phase:** Phase 5 (summary)
-- **Status:** Milestone 7 built (uncommitted); Milestone 8 plan awaiting approval (2026-10-31)
+- **Status:** Milestone 8 committed (2026-10-31)
 
 ## Completed milestones
 - 2026-10-31: Project root confirmed (`/Users/arins/Documents/Projects/FallingConstellations`); prototype `index.html` and `HANDOFF.md` copied in from `~/Downloads`
@@ -20,15 +20,18 @@ Milestone 6 (Stage 4) built, uncommitted: `src/quality.js` (phone base scale 0.6
 
 Phase 5: `summary.md` written 2026-10-31. User asked for upgrades 18–19 plus dynamic field nebulae (billow, form and dissolve, keep pulses; field nebulae only; live GPU noise). Milestone 7 addendum written at the end of `plan.md`. Next: get approval, then build Milestone 7; update `summary.md` afterwards.
 
-**Milestone 7 built (uncommitted, 96 tests pass, 2026-10-31):**
-- Live clouds (`src/sky/clouds.js`, `CLOUD_FS`, cloud target in `gl.js`, `cloudHz` on the quality ladder).
-- Diffraction spikes (`SPIKE`, `buildSpike`, `brightestIndex`).
-- Atlas grid: `src/grid.js` (`GRID`, pure `gridLines`, `createGrid` pre-renders per resize) + `test/grid.test.js`; `main.js` resizes it and draws it after the back layer, before the constellations.
-- Pane checks (pane hidden, so frame times throttled): spikes, grid, `?ldr`, `?nogl`, phone emulation all render with no console errors; clouds visibly form and thin over ~60 s. Note: in a hidden pane the first screenshots after a navigation can be blank until frames arrive.
-- `HANDOFF.md` and `summary.md` updated.
-- Next: user looks at spikes/grid/clouds (keep or drop grid, tune strengths), then approve the Milestone 7 commit and push.
+- 2026-10-31: Milestone 7 committed as bcd0993 and pushed: live nebulae, diffraction spikes, Atlas grid.
 
-**Milestone 8 (dynamic galaxies, clusters, knots):** addendum written at the end of `plan.md`, awaiting approval. Recommended: commit Milestone 7 first, then build Milestone 8.
+**Milestone 8 built (uncommitted, 108 tests pass, 2026-10-31):**
+- `field.js`: `MOTION`, `addMotion` (own seeded stream), face-on galaxy sprite (`face`), glow-only cluster sprite (`glow`), `galaxyMatrix`, `galaxyShimmer`, `clusterStar`, `clusterStarData`.
+- `shaders.js`: `SPIN_VS/FS`, `CLUSTER_VS/FS`; `KNOT_VS` slides and fades knots.
+- `src/galaxy/knots.js` (new): `KNOT`, `knotLife`, `armTangent`, `createKnots` (clumps, staggered lives, rebirth with `update`), `knotAt`; `structure.js` gains `pickKnotSpot`.
+- `gl.js`: cluster instanced draw, spinning galaxy draw, dynamic knot buffer with `bufferSubData` on rebirth; knot state kept on `field.knots`.
+- Tests: `test/knots.test.js` (new), motion tests in `test/field.test.js`.
+- Pane (visible): 60 fps at 1024×768 @2x and in phone emulation; no errors on default, `?ldr`, `?nogl`.
+- Docs: `HANDOFF.md`, `summary.md` updated.
+- Speed pass (user: motion not visible): galaxies 20–60 s/turn ±30% shimmer; clusters 30–60 s/turn, twinkle 0.25–1.25×; knots fade 2.5 s, glow 8–20 s, slide 3–5 px/s along the arm spiral (`armSlide`, dθ/dr = TWIST; replaced the map-gradient tangent, which drifted off the edge). Verified GPU uniforms change per frame and knots visibly change over 3 s in the pane; 60 fps.
+- Next: user looks at the motion, then approve the Milestone 8 commit and push.
 
 ## Open questions
 - On phones the galaxy (radius 0.56 × the longer side) is wider than the screen and is cropped; looks fine in emulation, revisit in Stage 4 if wanted.

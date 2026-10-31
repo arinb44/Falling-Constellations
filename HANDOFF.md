@@ -31,7 +31,7 @@ To test context loss, in the console: `document.getElementById('gl').getContext(
 bun test
 ```
 
-Unit tests live in `test/` and use Bun's built-in runner. They cover the pure logic: easing, the constellation generator, sprites, the far field, the galaxy orbit model (including that the arms never wind up), the arm structure bake, the tone map and bloom sizes, grading, shooting-star trails, the quality controller, the live nebula life cycle, diffraction spikes and the Atlas grid. Shaders and the look are checked by eye in a browser.
+Unit tests live in `test/` and use Bun's built-in runner. They cover the pure logic: easing, the constellation generator, sprites, the far field, the galaxy orbit model (including that the arms never wind up), the arm structure bake, the tone map and bloom sizes, grading, shooting-star trails, the quality controller, the live nebula life cycle, distant-galaxy spin and shimmer, cluster twinkle and swirl, the H-II knot life cycle, diffraction spikes and the Atlas grid. Shaders and the look are checked by eye in a browser.
 
 ## Layout
 
@@ -48,10 +48,11 @@ src/grid.js             faint Atlas coordinate grid, pre-rendered once per resiz
 src/shooters.js         shooting stars: pooled, blue streaks with a lingering trail
 src/starfield.js        far stars, 2D fallback only
 src/sky/noise.js        seeded RNG (mulberry32), gradient noise, FBM, domain warp
-src/sky/field.js        far field: nebula colours and pulses, dark dust, distant galaxies, star clusters (baked clouds for the 2D fallback)
+src/sky/field.js        far field: nebula colours and pulses, dark dust, distant galaxies, star clusters and their motion (baked clouds for the 2D fallback)
 src/sky/clouds.js       live nebula clouds: layout and life cycle (form, hold, dissolve, respawn) (pure)
 src/galaxy/model.js     galaxy star data, tilted-ellipse orbits, colours (pure; mirrors the shader)
-src/galaxy/structure.js arm map, dust lanes, gas, H-II knots, baked once (pure)
+src/galaxy/structure.js arm map, dust lanes, gas, H-II knot placement, baked once (pure)
+src/galaxy/knots.js     H-II knots that slide along the arms, fade and are reborn (pure)
 src/galaxy/shaders.js   all GLSL sources and post-processing constants
 src/galaxy/post.js      HDR target, bloom chain, tone map and grade
 src/galaxy/gl.js        WebGL2 back layer: setup, buffers, textures, draw order, quality hooks
@@ -67,12 +68,12 @@ One `requestAnimationFrame` loop. Motion runs on a sim clock that advances by `d
 **Back layer, far to near** (all drawn into an HDR target):
 
 1. Background gradient.
-2. Far field: distant galaxies and star clusters, then the live nebula clouds composited from a small cloud texture. All drift slowly together.
+2. Far field: the live nebula clouds composited from a small cloud texture, then cluster haze, distant galaxies (each spinning in its own tilted plane and shimmering) and cluster stars (twinkling and swirling, one instanced draw). All drift slowly together.
 3. Background stars (fall and wrap entirely on the GPU).
 4. Far-field dust, which dims the stars behind it.
 5. Galaxy core glow, then galaxy gas.
 6. Galaxy stars: 60k in one instanced draw.
-7. Galaxy dust lanes, which darken the stars, then pink H-II knots.
+7. Galaxy dust lanes, which darken the stars, then pink H-II knots (sliding along the arms, fading in and out).
 
 Then bloom (13-tap downsample with a Karis average on the first step, 3×3 tent upsample), Narkowicz ACES tone map, and a slight saturation and brightness pull so the constellations read on top.
 
@@ -80,15 +81,17 @@ Then bloom (13-tap downsample with a Karis average on the first step, 3×3 tent 
 
 **Live nebulae.** One cloud per ring sector (5). `CLOUD_FS` draws them all from 3D gradient noise with time as the third axis, inside a domain warp, so wisps billow instead of sliding. They go into an RGBA16F texture at ¼ of the WebGL resolution, refreshed `cloudHz` times a second (15, dropping to 10 and 6 on low quality rungs). `clouds.js` runs each cloud's life cycle: it forms out of wisps over 20 s (the noise threshold falls), holds 40–90 s, thins away over 20 s, and after a 4 s gap a new cloud forms in the same sector with a new shape and a colour unlike its neighbours. The random brightness pulses still apply. The 2D fallback keeps static baked clouds.
 
+**Distant galaxies and clusters.** Each distant galaxy is painted face-on; `SPIN_VS` tilts and squashes it on screen and turns it inside that plane (`galaxyMatrix`), so the arms wind round while the oval outline holds. Each has its own spin (one turn per 20–60 s, either way) and a ±30% shimmer (4–9 s). Cluster stars are drawn in one instanced pass over a baked haze: each twinkles (0.25–1.25×, 0.8–3 s) and turns around the cluster centre, the core about once per 30–60 s and outer stars slower. Motion parameters come from their own seeded stream, so a seed's layout is unchanged. The 2D fallback keeps static sprites.
+
 **Galaxy model.** Every star moves on an ellipse whose long axis turns a little more with radius. Arms appear where neighbouring ellipses crowd together, and because the arm pattern depends only on that tilt, it never winds up. The vertex shader runs the same maths as `model.js`; the constants are pasted into the GLSL from JS so the two cannot drift apart. `G.GAIN` (0.55) sets overall galaxy brightness so it doesn't overpower the constellations.
 
 **Arm structure.** The ellipses are fixed in a frame that turns at `G.PATTERN`. `structure.js` bakes, once at startup and in that frame:
 - an arm map from the real star data
 - dust along each arm's inner edge
 - domain-warped gas
-- 140 H-II knots along the outer edges
+- where H-II knots may sit (along the outer edges)
 
-The GPU only rotates them.
+The GPU only rotates them. The 140 knots live in `knots.js`: in clumps of 1–3, each clump fades in over 2.5 s, glows 8–20 s while sliding along its arm at 3–5 px/s (on the arm spiral dθ/dr = TWIST, the way the stars orbit), fades out over 2.5 s, and is reborn on another outer edge. `KNOT_VS` computes position and fade from the clock; the CPU rewrites only a reborn clump's slots.
 
 **Constellations.** 5–11 stars placed by rejection sampling. A minimum spanning tree plus 0–2 loop edges keeps every figure connected without tangles. One cream/gold ink and 4 graded size classes come from pre-rendered sprites. Lines are thin, engraved-style, with gaps at the stars. The brightest star of each figure carries a faint upright 4-point diffraction spike (one pre-rendered sprite). Stars fade in one by one; lines ease in once the whole figure is on screen. `targetCount = max(5, round(W / 130))`; click-spawned ones don't count toward it.
 
@@ -115,6 +118,9 @@ The GPU only rotates them.
 | Nebula pulses | `PULSE` in `sky/field.js` | 2.2× swell, every 7–18 s |
 | Cloud life cycle | `LIFE` in `sky/clouds.js` | form 20 s, hold 40–90 s, dissolve 20 s, gap 4 s |
 | Cloud billowing, texture | `CLOUDS` in `sky/clouds.js` | speed 0.02, 15 Hz, ¼ res |
+| Distant galaxy spin, shimmer | `MOTION.SPIN_PERIOD`, `MOTION.SHIMMER` in `sky/field.js` | 20–60 s per turn, ±30% over 4–9 s |
+| Cluster swirl, twinkle | `MOTION.SWIRL_PERIOD`, `MOTION.TWINKLE` | 30–60 s at the core, 0.25–1.25× over 0.8–3 s |
+| H-II knot life | `KNOT` in `galaxy/knots.js` | fade 2.5 s, glow 8–20 s, slide 0.005–0.009 radii/s |
 | Diffraction spike | `SPIKE` in `sprites.js` | 34 px, 1.1 px wide, alpha 0.42 |
 | Atlas grid | `GRID` in `grid.js` | parallels every 0.26 H, meridians every 6°, alpha 0.055 |
 | Shooting-star trail | `FLIGHT`, `LINGER` in `shooters.js` | 0.8 s, 1.0 s |

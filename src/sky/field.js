@@ -143,6 +143,69 @@ export function makeClusters(rng, count = 2 + Math.floor(rng() * 3)) {
   });
 }
 
+/* ---------- motion: galaxies spin and shimmer, clusters twinkle and swirl (WebGL layer) ---------- */
+// Drawn from their own seeded stream, so adding motion leaves the layout of a seed unchanged.
+export const MOTION = {
+  SPIN_PERIOD: [20, 60],       // seconds per turn of a distant galaxy, within its own plane
+  SHIMMER: 0.3,                // ± brightness breathing of a distant galaxy
+  SHIMMER_PERIOD: [4, 9],      // seconds
+  SWIRL_PERIOD: [30, 60],      // seconds per turn at a cluster's core; slower further out
+  SWIRL_FALLOFF: 2,            // omega(r) = omega0 / (1 + SWIRL_FALLOFF * r / radius)
+  TWINKLE: [0.75, 0.5],        // cluster star brightness = mid + amp * sin(...): 0.25–1.25
+  TWINKLE_PERIOD: [0.8, 3],    // seconds
+  CLUSTER_STRIDE: 10           // u, v, dx, dy, size, alpha, omega, period, phase, blue
+};
+const TAU = Math.PI * 2;
+const span = (rng, [a, b]) => a + rng() * (b - a);
+
+export function addMotion(galaxies, clusters, rng) {
+  for (const g of galaxies) {
+    g.spin = (rng() < 0.5 ? -1 : 1) * TAU / span(rng, MOTION.SPIN_PERIOD);
+    g.spin0 = rng() * TAU;
+    g.shimmerPeriod = span(rng, MOTION.SHIMMER_PERIOD);
+    g.shimmerPhase = rng() * TAU;
+  }
+  for (const cl of clusters) {
+    cl.omega = (rng() < 0.5 ? -1 : 1) * TAU / span(rng, MOTION.SWIRL_PERIOD);
+    for (const st of cl.stars) { st.period = span(rng, MOTION.TWINKLE_PERIOD); st.phase = rng() * TAU; }
+  }
+}
+
+export const galaxyShimmer = (g, t) => 1 + MOTION.SHIMMER * Math.sin(TAU * t / g.shimmerPeriod + g.shimmerPhase);
+
+// Maps a quad corner (-1..1 on screen) to the face-on sprite's uv: undo the screen tilt, stretch
+// the squashed axis back out, then undo the spin. So the arms turn while the oval outline holds.
+// out is a column-major mat2 (uv = 0.5 + 0.5 * M * corner).
+export function galaxyMatrix(g, t, out = new Float32Array(4)) {
+  const a = -(g.spin0 + g.spin * t), ca = Math.cos(a), sa = Math.sin(a);
+  const b = -g.tilt, cb = Math.cos(b), sb = Math.sin(b), k = 1 / g.ratio;
+  // M = R(a) · diag(1, k) · R(b)
+  const m00 = cb, m01 = -sb, m10 = k * sb, m11 = k * cb;
+  out[0] = ca * m00 - sa * m10; out[1] = sa * m00 + ca * m10;
+  out[2] = ca * m01 - sa * m11; out[3] = sa * m01 + ca * m11;
+  return out;
+}
+
+// cluster star offset (CSS px from the cluster centre) and brightness at time t; mirrors CLUSTER_VS
+export const swirlOmega = (cl, st) => cl.omega / (1 + MOTION.SWIRL_FALLOFF * Math.hypot(st.dx, st.dy) / cl.radius);
+export function clusterStar(cl, st, t, out = { x: 0, y: 0, a: 0 }) {
+  const w = swirlOmega(cl, st) * t, c = Math.cos(w), s = Math.sin(w);
+  out.x = st.dx * c - st.dy * s; out.y = st.dx * s + st.dy * c;
+  out.a = st.a * (MOTION.TWINKLE[0] + MOTION.TWINKLE[1] * Math.sin(TAU * t / st.period + st.phase));
+  return out;
+}
+
+// one instance per cluster star, for a single instanced draw
+export function clusterStarData(clusters) {
+  const n = clusters.reduce((k, cl) => k + cl.stars.length, 0), d = new Float32Array(n * MOTION.CLUSTER_STRIDE);
+  let o = 0;
+  for (const cl of clusters) for (const st of cl.stars) {
+    d.set([cl.u, cl.v, st.dx, st.dy, st.s * 0.6, st.a, swirlOmega(cl, st), st.period, st.phase, cl.blue ? 1 : 0], o);
+    o += MOTION.CLUSTER_STRIDE;
+  }
+  return d;
+}
+
 /* ---------- painting (needs a canvas) ---------- */
 const defaultCanvas = (w, h) => {
   if (typeof OffscreenCanvas !== 'undefined') return new OffscreenCanvas(w, h);
@@ -150,9 +213,11 @@ const defaultCanvas = (w, h) => {
 };
 const SPRITE_DPR = 2;
 
-function paintGalaxy(g, makeCanvas) {
+// faceOn: paint the galaxy as seen from straight above (WebGL tilts and spins it in the shader)
+function paintGalaxy(g, makeCanvas, faceOn = false) {
   const px = Math.ceil(g.size * 1.6 * SPRITE_DPR), c = makeCanvas(px, px), x = c.getContext('2d'), m = px / 2;
-  x.translate(m, m); x.rotate(g.tilt); x.scale(1, g.ratio);
+  x.translate(m, m);
+  if (!faceOn) { x.rotate(g.tilt); x.scale(1, g.ratio); }
   const rad = (g.size / 2) * SPRITE_DPR, col = g.warm ? '255,226,190' : '214,224,255';
   const halo = x.createRadialGradient(0, 0, 0, 0, 0, rad);
   halo.addColorStop(0, `rgba(${col},1)`); halo.addColorStop(0.18, `rgba(${col},0.55)`); halo.addColorStop(1, `rgba(${col},0)`);
@@ -173,12 +238,14 @@ function paintGalaxy(g, makeCanvas) {
   return { canvas: c, size: px / SPRITE_DPR };
 }
 
-function paintCluster(cl, makeCanvas) {
+// glowOnly: just the faint haze (WebGL draws the stars itself, so they can twinkle and swirl)
+function paintCluster(cl, makeCanvas, glowOnly = false) {
   const px = Math.ceil(cl.radius * 2.4 * SPRITE_DPR), c = makeCanvas(px, px), x = c.getContext('2d'), m = px / 2;
   const col = cl.blue ? '214,228,255' : '255,240,214';
   const glow = x.createRadialGradient(m, m, 0, m, m, cl.radius * SPRITE_DPR);
   glow.addColorStop(0, `rgba(${col},0.10)`); glow.addColorStop(1, `rgba(${col},0)`);
   x.fillStyle = glow; x.fillRect(0, 0, px, px);
+  if (glowOnly) return { canvas: c, size: px / SPRITE_DPR };
   for (const s of cl.stars) {
     x.fillStyle = `rgba(${col},${s.a})`;
     x.beginPath(); x.arc(m + s.dx * SPRITE_DPR, m + s.dy * SPRITE_DPR, s.s * SPRITE_DPR * 0.6, 0, Math.PI * 2); x.fill();
@@ -199,8 +266,9 @@ function imageCanvas(w, h, rgba, makeCanvas) {
 export function createField(seed = Math.floor(Math.random() * 2 ** 31), makeCanvas = defaultCanvas) {
   const rng = mulberry32(seed), noise = makeNoise(rng);
   const lanes = makeLanes(rng);
-  const galaxies = makeDistantGalaxies(rng).map(g => ({ ...g, sprite: paintGalaxy(g, makeCanvas) }));
-  const clusters = makeClusters(rng).map(cl => ({ ...cl, sprite: paintCluster(cl, makeCanvas) }));
+  const galaxies = makeDistantGalaxies(rng).map(g => ({ ...g, sprite: paintGalaxy(g, makeCanvas), face: paintGalaxy(g, makeCanvas, true) }));
+  const clusters = makeClusters(rng).map(cl => ({ ...cl, sprite: paintCluster(cl, makeCanvas), glow: paintCluster(cl, makeCanvas, true) }));
+  addMotion(galaxies, clusters, mulberry32(seed ^ 0x27d4eb2f));
   // withClouds: bake cloud images (2D fallback only; the WebGL layer draws live clouds instead)
   const field = { seed, lanes, galaxies, clusters, clouds: [], dust: null, w: 0, h: 0, bakeMs: 0, version: 0, withClouds: true };
 

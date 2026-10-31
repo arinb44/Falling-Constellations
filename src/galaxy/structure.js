@@ -130,15 +130,25 @@ export function bakeGas(arms, n = S.N, seed = 1) {
   return out;
 }
 
-// H-II knots: small pink points strung along each arm's outer edge, in clumps of 1–3.
-export function placeKnots(arms, n = S.N, seed = 1, count = S.KNOTS) {
-  const rng = mulberry32(seed ^ 0x1b873593), out = new Float32Array(count * S.KNOT_STRIDE);
-  let k = 0, tries = 0;
-  while (k < count && tries++ < 200000) {
+// A random spot on an arm's outer edge (rejection sampling, weighted by outerEdge²).
+export function pickKnotSpot(arms, n, rng, out = { x: 0, y: 0 }, maxTries = 200000) {
+  for (let tries = 0; tries < maxTries; tries++) {
     const r = 0.22 + rng() * 0.72, ang = rng() * Math.PI * 2;
     const x = r * Math.cos(ang), y = r * Math.sin(ang);
     const p = outerEdge(arms, n, x, y) * discEdge(r);
     if (rng() > p * p) continue;
+    out.x = x; out.y = y;
+    return out;
+  }
+  return null;
+}
+
+// H-II knots: small pink points strung along each arm's outer edge, in clumps of 1–3.
+export function placeKnots(arms, n = S.N, seed = 1, count = S.KNOTS) {
+  const rng = mulberry32(seed ^ 0x1b873593), out = new Float32Array(count * S.KNOT_STRIDE), spot = { x: 0, y: 0 };
+  let k = 0;
+  while (k < count && pickKnotSpot(arms, n, rng, spot)) {
+    const x = spot.x, y = spot.y;
     const clump = 1 + Math.floor(rng() * 3);
     for (let c = 0; c < clump && k < count; c++, k++) {
       const o = k * S.KNOT_STRIDE, b = (0.4 + 0.5 * rng()) * G.GAIN;

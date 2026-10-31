@@ -34,3 +34,5 @@
 | 2026-10-31 | Resume: Milestone 7 found part-built as recorded | **Continue from the Atlas grid** |
 | 2026-10-31 | Dynamic far field (request: "make the background star clusters and distant galaxies dynamic as well... the pink clusters on the outside of the galaxy arms should also move"). Asked how each should move. | **Galaxies: spin and shimmer. Clusters: twinkle and swirl. Pink knots: live along the arms (slide along the outer edge, born and fade, respawn elsewhere).** Planned as Milestone 8 |
 | 2026-10-31 | Milestone 8 plan; commit Milestone 7 first | **Approved; commit Milestone 7 first** |
+| 2026-10-31 | Motion not visible (feedback: "are you sure that they are in motion? I cant see it"). Measured: moving, but far too slow. Options: clearly visible, noticeable but calm, very lively. | **Clearly visible**: galaxies a turn per 20–60 s, ±30% shimmer; clusters a turn per 30–60 s, twinkle 0.25–1.25×; knots fade 2.5 s, glow 8–20 s, slide 3–5 px/s |
+| 2026-10-31 | Milestone 8 look and commit | **Looks good, commit** |

@@ -6,11 +6,12 @@
 // which are black with alpha (ONE/ONE_MINUS_SRC_ALPHA).
 import * as S from './shaders.js';
 import { G, STRIDE, buildStars as buildGalaxyStars } from './model.js';
-import { FIELD_MARGIN, fieldOrigin } from '../sky/field.js';
+import { FIELD_MARGIN, fieldOrigin, MOTION, galaxyMatrix, galaxyShimmer, clusterStarData } from '../sky/field.js';
 import { createSky, updateClouds, CLOUDS } from '../sky/clouds.js';
 import { mulberry32 } from '../sky/noise.js';
 import { createPost, makeTarget, freeTarget } from './post.js';
 import { S as SX, bakeStructure } from './structure.js';
+import { KNOT, createKnots } from './knots.js';
 
 const STAR_STRIDE = 7;   // background stars: u, v0, size, speed, phase, twinkle, (pad)
 
@@ -61,6 +62,8 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     bg: compile(gl, S.FULLSCREEN_VS, S.BG_FS),
     core: compile(gl, S.FULLSCREEN_VS, S.CORE_FS),
     rect: compile(gl, S.RECT_VS, S.RECT_FS),
+    spin: compile(gl, S.SPIN_VS, S.SPIN_FS),
+    cluster: compile(gl, S.CLUSTER_VS, S.CLUSTER_FS),
     stars: compile(gl, S.FIELDSTAR_VS, S.FIELDSTAR_FS),
     galaxy: compile(gl, S.GALAXY_VS, S.GALAXY_FS),
     disc: compile(gl, S.DISC_VS, S.DISC_FS),
@@ -92,13 +95,15 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
   }
 
   // arm structure: baked once in the pattern frame (structure.js), only rotated per frame
-  const knotCount = structure.knots.length / SX.KNOT_STRIDE;
+  // H-II knots live along the arms; their state is kept on the field so a context restore resumes it
+  const knots = field.knots || (field.knots = createKnots(structure, field.seed));
   const knotVao = gl.createVertexArray();
   gl.bindVertexArray(knotVao); withQuad();
-  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
-  gl.bufferData(gl.ARRAY_BUFFER, structure.knots, gl.STATIC_DRAW);
-  for (const [loc, off] of [[1, 0], [2, 3]]) {
-    gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, SX.KNOT_STRIDE * 4, off * 4); gl.vertexAttribDivisor(loc, 1);
+  const kbuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, kbuf);
+  gl.bufferData(gl.ARRAY_BUFFER, knots.data, gl.DYNAMIC_DRAW);
+  for (const [loc, size, off] of [[1, 3, 0], [2, 3, 3], [3, 2, 6], [4, 2, 8]]) {
+    gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, size, gl.FLOAT, false, KNOT.STRIDE * 4, off * 4); gl.vertexAttribDivisor(loc, 1);
   }
   // half-float so the faint gas doesn't band; float data must not be premultiplied on upload
   const floatTexture = data => {
@@ -124,6 +129,17 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, size, gl.FLOAT, false, ss, off * 4); gl.vertexAttribDivisor(loc, 1);
   }
   let starCount = 0;
+
+  // cluster stars: one instanced draw; they swirl and twinkle in the shader
+  const clusterVao = gl.createVertexArray();
+  gl.bindVertexArray(clusterVao); withQuad();
+  gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+  const clusterData = clusterStarData(field.clusters), cstride = MOTION.CLUSTER_STRIDE * 4;
+  gl.bufferData(gl.ARRAY_BUFFER, clusterData, gl.STATIC_DRAW);
+  for (const [loc, size, off] of [[1, 4, 0], [2, 3, 4], [3, 3, 7]]) {
+    gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, size, gl.FLOAT, false, cstride, off * 4); gl.vertexAttribDivisor(loc, 1);
+  }
+  const clusterCount = clusterData.length / MOTION.CLUSTER_STRIDE;
   gl.bindVertexArray(null);
 
   // textures: canvases from the far-field bake, premultiplied on upload
@@ -138,8 +154,10 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src);
     return t;
   };
-  const sprites = [...field.clusters.map(c => ({ obj: c, alpha: 1 })), ...field.galaxies.map(g => ({ obj: g, alpha: g.alpha }))]
-    .map(s => ({ ...s, tex: texture(s.obj.sprite.canvas) }));
+  // clusters: only their haze is a sprite; galaxies: face-on sprites, tilted and spun in SPIN_VS
+  const glows = field.clusters.map(c => ({ obj: c, size: c.glow.size, tex: texture(c.glow.canvas) }));
+  const galaxies = field.galaxies.map(g => ({ obj: g, size: g.face.size, tex: texture(g.face.canvas) }));
+  const spinM = new Float32Array(4);
   let dustTex = null, bakedVersion = 0;
 
   // live nebulae: the sky state lives on the field so it survives a context restore
@@ -249,9 +267,31 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     gl.useProgram(progs.rect.prog);
     gl.uniform2f(progs.rect.u.u_view, W, H);
     rect(o.x, o.y, fw, fh, cloudTarget.tex, 1);
-    for (let i = 0; i < sprites.length; i++) {
-      const s = sprites[i], d = s.obj.sprite.size;
-      rect(o.x + s.obj.u * fw - d / 2, o.y + s.obj.v * fh - d / 2, d, d, s.tex, s.alpha);
+    for (let i = 0; i < glows.length; i++) {
+      const s = glows[i], d = s.size;
+      rect(o.x + s.obj.u * fw - d / 2, o.y + s.obj.v * fh - d / 2, d, d, s.tex, 1);
+    }
+    const sp = progs.spin;
+    gl.useProgram(sp.prog);
+    gl.uniform2f(sp.u.u_view, W, H);
+    for (let i = 0; i < galaxies.length; i++) {
+      const s = galaxies[i], g = s.obj, d = s.size;
+      gl.uniformMatrix2fv(sp.u.u_m, false, galaxyMatrix(g, t, spinM));
+      gl.uniform4f(sp.u.u_rect, o.x + g.u * fw - d / 2, o.y + g.v * fh - d / 2, d, d);
+      gl.uniform1f(sp.u.u_alpha, g.alpha * galaxyShimmer(g, t));
+      gl.bindTexture(gl.TEXTURE_2D, s.tex);
+      gl.drawArrays(gl.TRIANGLES, 0, 6);
+    }
+    if (clusterCount) {
+      const cp = progs.cluster;
+      gl.bindVertexArray(clusterVao);
+      gl.useProgram(cp.prog);
+      gl.uniform2f(cp.u.u_view, W, H);
+      gl.uniform2f(cp.u.u_origin, o.x, o.y);
+      gl.uniform2f(cp.u.u_field, fw, fh);
+      gl.uniform1f(cp.u.u_time, t);
+      gl.uniform1f(cp.u.u_dpr, DPR);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, clusterCount);
     }
 
     gl.bindVertexArray(starVao);
@@ -291,13 +331,20 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     disc(galaxyDustTex, t, R);
     gl.blendFunc(gl.ONE, gl.ONE);
 
+    // reborn clumps: rewrite just their slots
+    const reborn = knots.update(t);
+    if (reborn) gl.bindBuffer(gl.ARRAY_BUFFER, kbuf);
+    for (let i = 0; i < reborn; i++) {
+      const g = knots.groups[knots.dirty[i]], off = g.start * KNOT.STRIDE;
+      gl.bufferSubData(gl.ARRAY_BUFFER, off * 4, knots.data, off, g.count * KNOT.STRIDE);
+    }
     gl.bindVertexArray(knotVao);
     gl.useProgram(progs.knots.prog);
     gl.uniform2f(progs.knots.u.u_view, W, H);
     gl.uniform1f(progs.knots.u.u_time, t);
     gl.uniform1f(progs.knots.u.u_radius, R);
     gl.uniform1f(progs.knots.u.u_dpr, DPR);
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, knotCount);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, knots.count);
 
     post.finish(canvas.width, canvas.height);
     gl.bindVertexArray(null);

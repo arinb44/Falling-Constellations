@@ -1,6 +1,8 @@
 /* ---------- GLSL sources (WebGL2 / GLSL ES 3.00) ---------- */
 // All positions are worked out in CSS pixels and converted to clip space with u_view (W, H).
 import { G } from './model.js';
+import { MOTION } from '../sky/field.js';
+import { KNOT } from './knots.js';
 
 const f = x => (Number.isInteger(x) ? x.toFixed(1) : String(x));
 const toClip = `
@@ -64,6 +66,72 @@ uniform sampler2D u_tex;
 uniform float u_alpha;
 out vec4 o;
 void main() { o = texture(u_tex, v_uv) * u_alpha; }`;
+
+/* ---------- distant galaxies: a face-on sprite, tilted and spun here ---------- */
+// u_m maps a quad corner to the sprite's uv (galaxyMatrix in field.js), so the arms turn
+// inside the galaxy's own tilted plane while the oval outline stays put.
+export const SPIN_VS = `#version 300 es
+layout(location = 0) in vec2 corner;
+uniform vec2 u_view;
+uniform vec4 u_rect;          // x, y, w, h in CSS px
+uniform mat2 u_m;
+out vec2 v_uv;
+${toClip}
+void main() {
+  v_uv = 0.5 + 0.5 * (u_m * corner);
+  gl_Position = toClip(u_rect.xy + (corner * 0.5 + 0.5) * u_rect.zw);
+}`;
+
+// outside the sprite (stretched corners) there is nothing to draw
+export const SPIN_FS = `#version 300 es
+precision mediump float;
+in vec2 v_uv;
+uniform sampler2D u_tex;
+uniform float u_alpha;
+out vec4 o;
+void main() {
+  if (any(lessThan(v_uv, vec2(0.0))) || any(greaterThan(v_uv, vec2(1.0)))) discard;
+  o = texture(u_tex, v_uv) * u_alpha;
+}`;
+
+/* ---------- star-cluster stars: twinkle and swirl ---------- */
+// per instance: cluster u, v (field units), offset dx, dy (CSS px), radius, alpha, omega, period, phase, blue
+export const CLUSTER_VS = `#version 300 es
+layout(location = 0) in vec2 corner;
+layout(location = 1) in vec4 pos;        // u, v, dx, dy
+layout(location = 2) in vec3 look;       // radius, alpha, omega
+layout(location = 3) in vec3 tw;         // period, phase, blue
+uniform vec2 u_view;
+uniform vec2 u_origin;                   // field top-left, CSS px
+uniform vec2 u_field;                    // field size, CSS px
+uniform float u_time;
+uniform float u_dpr;
+out vec2 v_c;
+out vec3 v_col;
+${toClip}
+void main() {
+  float w = look.z * u_time;
+  vec2 d = vec2(pos.z * cos(w) - pos.w * sin(w), pos.z * sin(w) + pos.w * cos(w));
+  float a = look.y * (${MOTION.TWINKLE[0].toFixed(3)} + ${MOTION.TWINKLE[1].toFixed(3)} * sin(6.2831853 * u_time / tw.x + tw.y));
+  vec3 col = mix(vec3(255.0, 240.0, 214.0), vec3(214.0, 228.0, 255.0), tw.z) / 255.0;
+  float r = max(look.x, 0.6 / u_dpr) * 2.0;
+  v_c = corner;
+  v_col = col * a;
+  gl_Position = toClip(u_origin + pos.xy * u_field + d + corner * r);
+}`;
+
+export const CLUSTER_FS = `#version 300 es
+precision mediump float;
+in vec2 v_c;
+in vec3 v_col;
+out vec4 o;
+void main() {
+  float d = dot(v_c, v_c);
+  if (d > 1.0) discard;
+  // a small round dot like the 2D sprite's arcs, softened at the edge
+  float k = 1.0 - smoothstep(0.2, 0.3, d);
+  o = vec4(v_col * k, 0.0);
+}`;
 
 /* ---------- background stars: fall and wrap entirely on the GPU ---------- */
 // per instance: u, v0, size, speed (px/s), phase, twinkle rate
@@ -262,11 +330,14 @@ uniform float u_gain;
 out vec4 o;
 void main() { o = texture(u_tex, v_uv) * u_gain; }`;
 
-// per instance: plane position, size (CSS px), colour
+// per instance: plane position at birth, size (CSS px), colour, slide over the whole life,
+// birth time and life length. Each knot slides along its arm and fades in and out (knots.js).
 export const KNOT_VS = `#version 300 es
 layout(location = 0) in vec2 corner;
 layout(location = 1) in vec3 pos;        // x, y, size
 layout(location = 2) in vec3 colour;
+layout(location = 3) in vec2 slide;      // change in radius and angle over the whole life
+layout(location = 4) in vec2 life;       // born, total
 uniform vec2 u_view;
 uniform float u_time;
 uniform float u_radius;
@@ -276,10 +347,15 @@ out vec3 v_col;
 ${toClip}
 ${planeToScreen}
 void main() {
+  float age = u_time - life.x;
+  float fade = smoothstep(0.0, ${f(KNOT.FADE)}, age) * (1.0 - smoothstep(life.y - ${f(KNOT.FADE)}, life.y, age));
+  if (age <= 0.0 || age >= life.y || fade <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }   // off-screen
   float r = max(pos.z, 1.2 / u_dpr) * 1.6;
   v_c = corner;
-  v_col = colour;
-  gl_Position = toClip(planeToScreen(pos.xy) + corner * r);
+  v_col = colour * fade;
+  float f = clamp(age / life.y, 0.0, 1.0);
+  float pr = length(pos.xy) + slide.x * f, pa = atan(pos.y, pos.x) + slide.y * f;
+  gl_Position = toClip(planeToScreen(pr * vec2(cos(pa), sin(pa))) + corner * r);
 }`;
 
 /* ---------- post: bloom chain and filmic tone map ---------- */

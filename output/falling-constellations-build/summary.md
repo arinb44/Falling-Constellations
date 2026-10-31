@@ -2,15 +2,15 @@
 
 **Prepared by:** Falling Constellations Build Agent
 **Date:** 2026-10-31
-**Status:** Complete (core upgrades 1–17, plus Milestone 7: optional upgrades 18–19 and live field nebulae; Milestone 7 not yet committed)
+**Status:** Complete (core upgrades 1–17, Milestone 7: optional upgrades 18–19 and live nebulae, Milestone 8: moving galaxies, clusters and knots; Milestone 8 not yet committed)
 
 ## 1. Overview
-The single-file Canvas 2D prototype is now a two-layer piece. Atlas-style constellations are drawn on a transparent 2D canvas. Behind them, a WebGL2 layer draws a 60k-star spiral galaxy plus the far field: nebulae, dust, distant galaxies and clusters. That layer renders through an HDR pipeline with bloom, an ACES tone map and grading. The galaxy's arms come from tilted elliptical orbits, so they never wind up. Dust lanes, H-II knots and gas are baked once and rotate with the arm pattern. Phones draw the galaxy layer at reduced resolution, an adaptive controller trades quality for frame rate, and a lost WebGL context is rebuilt. Milestone 7 added live field nebulae that billow, form and dissolve on the GPU, faint diffraction spikes on each figure's brightest star, and a faint Atlas coordinate grid. All 96 unit tests pass and the page ran at 60 fps in the browser pane.
+The single-file Canvas 2D prototype is now a two-layer piece. Atlas-style constellations are drawn on a transparent 2D canvas. Behind them, a WebGL2 layer draws a 60k-star spiral galaxy plus the far field: nebulae, dust, distant galaxies and clusters. That layer renders through an HDR pipeline with bloom, an ACES tone map and grading. The galaxy's arms come from tilted elliptical orbits, so they never wind up. Dust lanes, H-II knots and gas are baked once and rotate with the arm pattern. Phones draw the galaxy layer at reduced resolution, an adaptive controller trades quality for frame rate, and a lost WebGL context is rebuilt. Milestone 7 added live field nebulae that billow, form and dissolve on the GPU, faint diffraction spikes on each figure's brightest star, and a faint Atlas coordinate grid. Milestone 8 set the rest of the background in motion: distant galaxies spin in their own planes and shimmer, cluster stars twinkle and swirl, and the pink H-II knots slide along the arms, fade and are reborn elsewhere. All 108 unit tests pass and the page runs at 60 fps in the browser pane, on desktop and in phone emulation.
 
 ## 2. Requirements Checklist
 | # | Requirement | Status | Note |
 |---|---|---|---|
-| 1 | Test setup | Done | `bun test`, no packages; 96 tests across 14 files |
+| 1 | Test setup | Done | `bun test`, no packages; 108 tests across 15 files |
 | 2 | Dev readout | Done | `?debug`; later extended with HDR/LDR, bloom, quality rung |
 | 3 | [1] Atlas restyle | Done | Cream→gold ink, 4 size classes, engraved lines with gaps |
 | 4 | [2] Star sprites | Done | Pre-rendered once (`sprites.js`) |
@@ -34,6 +34,10 @@ The single-file Canvas 2D prototype is now a two-layer piece. Atlas-style conste
 | 22 | Dynamic field nebulae (Milestone 7) | Done | Live 3D noise in `CLOUD_FS`; form 20 s, hold 40–90 s, dissolve 20 s, respawn in the same sector with a new shape and colour; pulses kept; 2D fallback keeps baked clouds |
 | 23 | [18] Diffraction spikes | Done | One upright 4-point sprite under each figure's brightest star |
 | 24 | [19] Atlas grid | Done | Parallels and meridians around an off-screen pole, alpha 0.055, pre-rendered per resize |
+| 25 | Distant galaxies spin and shimmer (Milestone 8) | Done | Face-on sprite tilted and spun in `SPIN_VS`; outline fixed, arms turn |
+| 26 | Clusters twinkle and swirl (Milestone 8) | Done | One instanced draw over a baked haze; inner stars turn faster |
+| 27 | Pink knots live along the arms (Milestone 8) | Done | `knots.js`: clumps fade in, slide along the outer edge, fade out, reborn elsewhere |
+| 28–29 | 2D fallback unchanged; negligible cost (Milestone 8) | Done | 60 fps unchanged at 1024×768 @2x and 375×812 |
 | — | Shooting stars (added) | Done | Blue streak; the trail stays 1 s and fades from the far end toward the head |
 
 ## 3. Changes Made
@@ -50,9 +54,10 @@ The single-file Canvas 2D prototype is now a two-layer piece. Atlas-style conste
 - `src/galaxy/gl.js`: WebGL2 back layer
 - `src/sky/clouds.js`: live nebula layout and life cycle
 - `src/grid.js`: Atlas coordinate grid
+- `src/galaxy/knots.js`: H-II knot life cycle and slide along the arms
 - `scripts/serve.js`: Bun static server
 - `package.json`: test script, no dependencies
-- `test/*.test.js` (14 files) and `test/fakes.js`
+- `test/*.test.js` (15 files) and `test/fakes.js`
 
 **Modified**
 - `index.html`: thin page with two stacked canvases and a module script
@@ -80,7 +85,7 @@ The main settings are listed in the Tunables table in `HANDOFF.md`, for example 
 
 ## 5. Testing
 - **Command:** `bun test`
-- **Final result:** 96 passed, 0 failed across 14 files.
+- **Final result:** 108 passed, 0 failed across 15 files.
 - **What the tests cover:**
   - easing
   - the constellation generator (connected tree, spacing, edges) and draw-in timing
@@ -95,6 +100,8 @@ The main settings are listed in the Tunables table in `HANDOFF.md`, for example 
   - the quality controller (warm-up, step-down, hitches, slow step-up with backoff, steady rise)
   - the nebula life cycle (starts and ends at zero, continuous, respawn stays in its sector, neighbours differ in colour, pulses)
   - the brightest-star choice and spike sprite
+  - distant-galaxy spin (outline kept, arms turn) and shimmer range; cluster swirl (radius kept, inner faster) and twinkle range; seed layout unchanged by motion
+  - H-II knots: life cycle, tangent direction, staying on the outer edge while sliding, rebirth of one clump, steady glowing count over 10 minutes
   - the Atlas grid geometry (pole off-screen, every line crosses the screen, even spacing, faint) and its one-time pre-render
 - **Checked in the browser pane, not by unit tests:**
   - the shaders and the look
@@ -103,6 +110,7 @@ The main settings are listed in the Tunables table in `HANDOFF.md`, for example 
   - forced context loss and restore
   - phone emulation (375×812)
   - Milestone 7: spikes, grid, `?ldr`, `?nogl` and phone emulation render with no console errors; screenshots over ~60 s show clouds forming and thinning. 60 fps with live clouds was measured at 900×700 @2x before the grid was added; the final check ran with the pane hidden, so its frame times were throttled and not meaningful.
+  - Milestone 8 (pane visible): 60 fps (16.6 ms avg) at 1024×768 @2x and 60 fps in phone emulation at full quality; no console errors on the default, `?ldr` and `?nogl` paths.
 - **Not covered:**
   - Real phones and 120 Hz screens; phone behaviour was checked by emulation only.
   - The browser pane was often throttled or zero-sized, so some checks used a fixed emulated viewport.
@@ -119,8 +127,9 @@ The main settings are listed in the Tunables table in `HANDOFF.md`, for example 
 | `a700805` | Restyle shooting stars as blue streaks with a lingering trail |
 | `81fa75e` | Add dust lanes, H-II knots, galaxy gas and grading |
 | `bcc2a7a` | Add phone resolution, adaptive quality and WebGL context-loss recovery |
+| `bcd0993` | Add live billowing nebulae, diffraction spikes and an Atlas grid |
 
-Milestone 7 is not yet committed. All of the above are pushed to `https://github.com/arinb44/Falling-Constellations` on `main`.
+Milestone 8 is not yet committed. All of the above are pushed to `https://github.com/arinb44/Falling-Constellations` on `main`.
 
 ## 7. Decision Log
 - **Setup:**
@@ -141,13 +150,15 @@ Milestone 7 is not yet committed. All of the above are pushed to `https://github
 - **Shooting stars:** a blue streak whose trail stays briefly and fades from the far end toward the head.
 - **On resume:** kept and finished the partly built Milestone 4 rather than restarting it.
 - **Milestone 5:** the look was approved as built.
+- **Milestone 8:** galaxies spin and shimmer, clusters twinkle and swirl, pink knots live along the arms; then sped up to "clearly visible" (first speeds were too slow to see).
 - **Milestone 7:** build both optional upgrades; make the field nebulae billow, form and dissolve with live GPU noise, keeping the pulses (field nebulae only).
 
 The full table is in `decisions.md`.
 
 ## 8. Known Issues & Next Steps
 - **Milestone 7 look** still needs your eye: spike strength, grid visibility (the report says drop it if it clutters), and cloud speed and life-cycle lengths.
-- **Frame rate with live clouds** should be re-measured with the pane visible, and on a real phone.
+- **Milestone 8 speeds** were raised after the first version moved too slowly to see; distant galaxies and clusters are small (5–40 px), so their motion stays subtler than the knots'.
+- **Real phone:** frame rate with the live clouds and moving knots is only checked in emulation.
 - **Real-device testing:** try a real phone and a 120 Hz screen. The quality thresholds (20 ms / 17.5 ms) assume 60 Hz. A phone in a 30 fps low-power mode would read as slow and step down to the last rung.
 - **Wide galaxy on phones:** the galaxy (radius 0.56 × the longer side) is wider than a phone screen and is cropped. It looks fine in emulation.
 - **Dimmer galaxy at low rungs:** with fewer stars drawn, the remaining ones are brightened by 1/√share, so the galaxy gets a little dimmer on the lowest rungs.
