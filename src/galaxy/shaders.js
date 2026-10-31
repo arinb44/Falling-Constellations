@@ -156,6 +156,77 @@ void main() {
   o = vec4(v_col * k, 0.0);
 }`;
 
+/* ---------- live field nebulae (drawn into a small texture a few times a second) ---------- */
+// 3D gradient noise with time as the third axis, so shapes evolve instead of sliding.
+// An integer hash (PCG3D) avoids the precision trouble sin()-based hashes have on phones.
+const NOISE3 = `
+uvec3 pcg3d(uvec3 v) {
+  v = v * 1664525u + 1013904223u;
+  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+  v ^= v >> 16u;
+  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+  return v;
+}
+vec3 grad3(ivec3 i) { return vec3(pcg3d(uvec3(i)) & 0xffffu) / 32767.5 - 1.0; }
+float noise3(vec3 p) {
+  p += 64.0;                                   // keep lattice coordinates positive
+  ivec3 i = ivec3(floor(p)); vec3 f = fract(p);
+  vec3 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  float n000 = dot(grad3(i), f), n100 = dot(grad3(i + ivec3(1, 0, 0)), f - vec3(1, 0, 0));
+  float n010 = dot(grad3(i + ivec3(0, 1, 0)), f - vec3(0, 1, 0)), n110 = dot(grad3(i + ivec3(1, 1, 0)), f - vec3(1, 1, 0));
+  float n001 = dot(grad3(i + ivec3(0, 0, 1)), f - vec3(0, 0, 1)), n101 = dot(grad3(i + ivec3(1, 0, 1)), f - vec3(1, 0, 1));
+  float n011 = dot(grad3(i + ivec3(0, 1, 1)), f - vec3(0, 1, 1)), n111 = dot(grad3(i + ivec3(1, 1, 1)), f - vec3(1, 1, 1));
+  return mix(mix(mix(n000, n100, u.x), mix(n010, n110, u.x), u.y), mix(mix(n001, n101, u.x), mix(n011, n111, u.x), u.y), u.z);
+}
+float fbm3(vec3 p, int octaves) {
+  float sum = 0.0, amp = 1.0, norm = 0.0;
+  for (int o = 0; o < 5; o++) {
+    if (o >= octaves) break;
+    sum += amp * noise3(p); norm += amp;
+    p = p * 2.02 + vec3(17.3, -9.1, 3.7); amp *= 0.5;
+  }
+  return sum / norm;
+}
+// fbm(p + k·fbm(p)), as warped() in noise.js, but moving through time
+float warped3(vec2 p, float t) {
+  vec2 q = vec2(fbm3(vec3(p, t), 4), fbm3(vec3(p + vec2(5.2, 1.3), t + 11.0), 4));
+  return fbm3(vec3(p + 3.2 * q, t * 0.7), 4);
+}`;
+
+// The whole far field (with its margin) in one texture: v_uv is the field position (u, v).
+// Life sets the noise threshold: at 0 nothing passes, at 1 the cloud has its full shape,
+// so a cloud grows out of its brightest wisps and thins back into them.
+export const CLOUD_MAX = 5;
+export const CLOUD_FS = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform float u_aspect;                 // field width / height
+uniform float u_time;                   // noise time
+uniform vec4 u_cl[${CLOUD_MAX}];        // u, v, radius, strength
+uniform vec4 u_cs[${CLOUD_MAX}];        // noise offset x, y, life, pulse
+uniform vec3 u_cc[${CLOUD_MAX}];        // colour
+uniform int u_count;
+out vec4 o;
+${NOISE3}
+void main() {
+  vec3 col = vec3(0.0);
+  for (int i = 0; i < ${CLOUD_MAX}; i++) {
+    if (i >= u_count) break;
+    vec4 c = u_cl[i], s = u_cs[i];
+    if (s.z <= 0.0) continue;
+    float d = length(vec2((v_uv.x - c.x) * u_aspect, v_uv.y - c.y)) / c.z;
+    if (d >= 1.0) continue;
+    float fall = (1.0 - d * d) * (1.0 - d * d);
+    vec2 p = vec2(v_uv.x * u_aspect * 2.2 + s.x, v_uv.y * 2.2 + s.y);
+    float t = u_time + float(i) * 7.0;
+    float n = warped3(p, t);
+    float fine = 0.75 + 0.25 * fbm3(vec3(p * 4.1 + s.yx, t * 1.5), 3);
+    float thr = mix(0.6, -0.15, s.z);
+    col += u_cc[i] * fall * smoothstep(thr, thr + 0.7, n) * fine * c.w * smoothstep(0.0, 0.15, s.z) * s.w;
+  }
+  o = vec4(col, 0.0);
+}`;
+
 /* ---------- galaxy structure: baked gas and dust, H-II knots ---------- */
 // Baked in the frame that turns with the arm pattern, so here they only rotate by PATTERN·t
 // and then get the same squash and view rotation as the stars.

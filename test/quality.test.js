@@ -18,7 +18,7 @@ test('phones draw the WebGL layer below full DPR, desktops and tablets do not', 
 test('the ladder gives up resolution first, then stars, then bloom', () => {
   for (let i = 1; i < LADDER.length; i++) {
     const a = LADDER[i - 1], b = LADDER[i];
-    expect(b.scale <= a.scale && b.stars <= a.stars && b.bloom <= a.bloom).toBe(true);
+    expect(b.scale <= a.scale && b.stars <= a.stars && b.bloom <= a.bloom && b.cloudHz <= a.cloudHz).toBe(true);
     if (b.stars < a.stars) expect(a.scale).toBe(LADDER[LADDER.length - 2].scale);   // resolution already down
     if (b.bloom < a.bloom) expect(a.stars).toBe(Math.min(...LADDER.map(r => r.stars)));
   }

@@ -16,6 +16,7 @@ Build every stage of `output/falling-constellations/report.md` (section 6, ranke
 - Stage 3: Deep Field effects: HDR, tone mapping, bloom, dust, H-II knots, nebula, grading (upgrades 10–14).
 - Stage 4: device tuning: reduced galaxy resolution on phones, adaptive quality, context-loss recovery (upgrades 15–17).
 - Optional touches (upgrades 18–19) only if the user asks for them at that point.
+- Milestone 7 (added 2026-10-31 at the user's request): optional upgrades 18–19, plus dynamic field nebulae that billow, form and dissolve like clouds.
 - Add a testing setup that covers the logic and lets each stage be checked.
 
 ## Specialization

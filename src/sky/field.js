@@ -201,7 +201,8 @@ export function createField(seed = Math.floor(Math.random() * 2 ** 31), makeCanv
   const lanes = makeLanes(rng);
   const galaxies = makeDistantGalaxies(rng).map(g => ({ ...g, sprite: paintGalaxy(g, makeCanvas) }));
   const clusters = makeClusters(rng).map(cl => ({ ...cl, sprite: paintCluster(cl, makeCanvas) }));
-  const field = { seed, lanes, galaxies, clusters, clouds: null, dust: null, w: 0, h: 0, bakeMs: 0, version: 0 };
+  // withClouds: bake cloud images (2D fallback only; the WebGL layer draws live clouds instead)
+  const field = { seed, lanes, galaxies, clusters, clouds: [], dust: null, w: 0, h: 0, bakeMs: 0, version: 0, withClouds: true };
 
   // Re-bakes the nebula and dust images for a viewport size (startup and resize only).
   field.bake = (W, H) => {
@@ -211,9 +212,9 @@ export function createField(seed = Math.floor(Math.random() * 2 ** 31), makeCanv
     // clouds depend on the aspect, so derive them from their own seeded stream each time,
     // keeping each cloud's pulse timer across resizes
     const prev = field.clouds;
-    field.clouds = makeClouds(mulberry32(seed ^ 0x9e3779b9), w / h);
+    field.clouds = field.withClouds ? makeClouds(mulberry32(seed ^ 0x9e3779b9), w / h) : [];
     field.clouds.forEach((c, i) => {
-      if (prev) { c.pulseAt = prev[i].pulseAt; c.next = prev[i].next; }
+      if (prev[i]) { c.pulseAt = prev[i].pulseAt; c.next = prev[i].next; }
       const img = cloudPixels(w, h, c, noise);
       c.rgba = img.rgba;
       c.image = imageCanvas(img.cw, img.ch, img.rgba, makeCanvas);

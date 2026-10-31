@@ -42,3 +42,26 @@ export function buildSprites(makeCanvas = defaultCanvas) {
     return { canvas, size: glow * 2 };
   });
 }
+
+/* ---------- diffraction spikes (brightest star of each figure) ---------- */
+// Faint 4-point cross, as a telescope's support vanes make; one fixed orientation for every star.
+export const SPIKE = {
+  LEN: 34,             // tip to tip, CSS px at depth 1
+  WIDTH: 1.1,          // CSS px
+  ALPHA: 0.42          // at the centre; fades to 0 at the tips
+};
+
+export function buildSpike(makeCanvas = defaultCanvas) {
+  const px = Math.ceil(SPIKE.LEN * SPRITE_SCALE), m = px / 2, w = SPIKE.WIDTH * SPRITE_SCALE;
+  const canvas = makeCanvas(px, px);
+  const g = canvas.getContext('2d');
+  for (const vertical of [false, true]) {
+    const grad = vertical ? g.createLinearGradient(0, 0, 0, px) : g.createLinearGradient(0, 0, px, 0);
+    grad.addColorStop(0, 'rgba(250,236,205,0)');
+    grad.addColorStop(0.5, `rgba(255,248,230,${SPIKE.ALPHA})`);
+    grad.addColorStop(1, 'rgba(250,236,205,0)');
+    g.fillStyle = grad;
+    if (vertical) g.fillRect(m - w / 2, 0, w, px); else g.fillRect(0, m - w / 2, px, w);
+  }
+  return { canvas, size: SPIKE.LEN };
+}

@@ -1,14 +1,15 @@
 /* ---------- WebGL2 back layer: far field, background stars, galaxy ---------- */
 // Everything below is drawn into an HDR target (post.js), then bloomed and tone mapped.
-// Draw order, far to near: background → nebulae → clusters and distant galaxies →
+// Draw order, far to near: background → live nebulae → clusters and distant galaxies →
 // background stars → dark dust → galaxy core glow → galaxy gas → galaxy stars → galaxy dust →
 // H-II knots. Everything is additive (premultiplied, ONE/ONE) except the two dust layers,
 // which are black with alpha (ONE/ONE_MINUS_SRC_ALPHA).
 import * as S from './shaders.js';
 import { G, STRIDE, buildStars as buildGalaxyStars } from './model.js';
-import { FIELD_MARGIN, fieldOrigin, pulse } from '../sky/field.js';
+import { FIELD_MARGIN, fieldOrigin } from '../sky/field.js';
+import { createSky, updateClouds, CLOUDS } from '../sky/clouds.js';
 import { mulberry32 } from '../sky/noise.js';
-import { createPost } from './post.js';
+import { createPost, makeTarget, freeTarget } from './post.js';
 import { S as SX, bakeStructure } from './structure.js';
 
 const STAR_STRIDE = 7;   // background stars: u, v0, size, speed, phase, twinkle, (pad)
@@ -63,7 +64,8 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     stars: compile(gl, S.FIELDSTAR_VS, S.FIELDSTAR_FS),
     galaxy: compile(gl, S.GALAXY_VS, S.GALAXY_FS),
     disc: compile(gl, S.DISC_VS, S.DISC_FS),
-    knots: compile(gl, S.KNOT_VS, S.GALAXY_FS)
+    knots: compile(gl, S.KNOT_VS, S.GALAXY_FS),
+    clouds: compile(gl, S.POST_VS, S.CLOUD_FS)
   };
 
   const quad = gl.createBuffer();
@@ -138,11 +140,17 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
   };
   const sprites = [...field.clusters.map(c => ({ obj: c, alpha: 1 })), ...field.galaxies.map(g => ({ obj: g, alpha: g.alpha }))]
     .map(s => ({ ...s, tex: texture(s.obj.sprite.canvas) }));
-  let cloudTex = [], dustTex = null, bakedVersion = 0;
+  let dustTex = null, bakedVersion = 0;
+
+  // live nebulae: the sky state lives on the field so it survives a context restore
+  const sky = field.sky || (field.sky = createSky(field.seed));
+  const cloudState = { life: new Float32Array(S.CLOUD_MAX), pulse: new Float32Array(S.CLOUD_MAX) };
+  const cl = new Float32Array(S.CLOUD_MAX * 4), cs = new Float32Array(S.CLOUD_MAX * 4), cc = new Float32Array(S.CLOUD_MAX * 3);
+  let cloudTarget = null, cloudAt = -1e9;
 
   const view = { W: 0, H: 0, DPR: 1 };
   // quality: resolution scale (on top of the phone base scale), share of galaxy stars, bloom levels
-  const quality = { scale: 1, stars: 1, bloom: 6 };
+  const quality = { scale: 1, stars: 1, bloom: 6, cloudHz: CLOUDS.REFRESH_HZ };
   const origin = { x: 0, y: 0 };
 
   // DPR here is the layer's own: device DPR × phone base scale; quality.scale is applied on top
@@ -151,6 +159,11 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     const d = DPR * quality.scale;
     canvas.width = Math.max(1, Math.round(W * d)); canvas.height = Math.max(1, Math.round(H * d));
     post.resize(canvas.width, canvas.height, quality.bloom);
+    // the cloud texture covers the whole field (viewport plus margin) at CLOUDS.RES
+    freeTarget(gl, cloudTarget);
+    const m = 1 + 2 * FIELD_MARGIN;
+    cloudTarget = makeTarget(gl, Math.max(8, Math.round(canvas.width * m * CLOUDS.RES)), Math.max(8, Math.round(canvas.height * m * CLOUDS.RES)), post.hdr);
+    cloudAt = -1e9;
     const n = Math.floor(W * H / 5500);
     if (n !== starCount) {
       gl.bindBuffer(gl.ARRAY_BUFFER, sbuf);
@@ -165,6 +178,29 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     gl.uniform1f(p.u.u_alpha, alpha);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
+  }
+
+  function drawClouds(t) {
+    updateClouds(sky, t, cloudState);
+    const n = Math.min(S.CLOUD_MAX, sky.clouds.length);
+    for (let i = 0; i < n; i++) {
+      const c = sky.clouds[i];
+      cl[i * 4] = c.u; cl[i * 4 + 1] = c.v; cl[i * 4 + 2] = c.r; cl[i * 4 + 3] = c.strength;
+      cs[i * 4] = c.ox; cs[i * 4 + 1] = c.oy; cs[i * 4 + 2] = cloudState.life[i]; cs[i * 4 + 3] = cloudState.pulse[i];
+      cc[i * 3] = c.colour[0]; cc[i * 3 + 1] = c.colour[1]; cc[i * 3 + 2] = c.colour[2];
+    }
+    const p = progs.clouds;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, cloudTarget.fb);
+    gl.viewport(0, 0, cloudTarget.w, cloudTarget.h);
+    gl.disable(gl.BLEND);
+    gl.useProgram(p.prog);
+    gl.uniform1f(p.u.u_aspect, (view.W / view.H) || 1);
+    gl.uniform1f(p.u.u_time, t * CLOUDS.SPEED);
+    gl.uniform4fv(p.u['u_cl[0]'], cl);
+    gl.uniform4fv(p.u['u_cs[0]'], cs);
+    gl.uniform3fv(p.u['u_cc[0]'], cc);
+    gl.uniform1i(p.u.u_count, n);
+    drawQuad();
   }
 
   // one baked layer on the rotating galaxy plane
@@ -191,11 +227,13 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     const { W, H } = view, DPR = view.DPR * quality.scale;
     // the bake is redone after resizes; pick up new images when they change
     if (field.version !== bakedVersion) {
-      for (const t of cloudTex) gl.deleteTexture(t);
       if (dustTex) gl.deleteTexture(dustTex);
-      cloudTex = field.clouds.map(c => texture(c.image)); dustTex = texture(field.dust);
+      dustTex = texture(field.dust);
       bakedVersion = field.version;
     }
+
+    // the clouds move slowly, so their texture is redrawn only a few times a second
+    if (t - cloudAt >= 1 / quality.cloudHz || t < cloudAt) { drawClouds(t); cloudAt = t; }
 
     post.begin();
     gl.disable(gl.BLEND);
@@ -210,11 +248,7 @@ export function createBackLayer(canvas, field, { forceLDR = false } = {}) {
     const fw = W * (1 + 2 * FIELD_MARGIN), fh = H * (1 + 2 * FIELD_MARGIN);
     gl.useProgram(progs.rect.prog);
     gl.uniform2f(progs.rect.u.u_view, W, H);
-    // each nebula cloud on its own, brightened by its pulse
-    for (let i = 0; i < cloudTex.length; i++) {
-      const c = field.clouds[i], r = c.rect;
-      rect(o.x + r.u * fw, o.y + r.v * fh, r.uw * fw, r.vh * fh, cloudTex[i], pulse(c, t));
-    }
+    rect(o.x, o.y, fw, fh, cloudTarget.tex, 1);
     for (let i = 0; i < sprites.length; i++) {
       const s = sprites[i], d = s.obj.sprite.size;
       rect(o.x + s.obj.u * fw - d / 2, o.y + s.obj.v * fh - d / 2, d, d, s.tex, s.alpha);

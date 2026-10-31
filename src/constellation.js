@@ -29,6 +29,8 @@ export function makeConstellation(x, y, atTop, now = 0, isAuto = true) {
   // every figure gets at least one bright star to anchor it
   if (!pts.some(p => p.cls <= 1)) pick(pts).cls = 0;
 
+  const spike = brightestIndex(pts);
+
   // minimum spanning tree (Prim) + a couple of loop-closing edges
   const edges = [], inT = new Set([0]);
   const dist = (a, b) => Math.hypot(pts[a].x - pts[b].x, pts[a].y - pts[b].y);
@@ -48,7 +50,7 @@ export function makeConstellation(x, y, atTop, now = 0, isAuto = true) {
 
   const depth = rand(0.55, 1.35);
   return {
-    pts, edges, ink: makeInk(), isAuto,
+    pts, edges, ink: makeInk(), isAuto, spike,
     // projected screen points, allocated once and rewritten every frame
     P: pts.map(p => ({ x: 0, y: 0, cls: p.cls, ph: p.ph })),
     x, y: atTop ? -160 * depth : y,
@@ -97,6 +99,13 @@ export function edgeProgress(prog, i, n) {
 // lines: ~0.7–1 px by depth, stopping short of each star
 export const lineWidthFor = depth => 0.7 + 0.3 * clamp01((depth - 0.55) / 0.8);
 export const gapFor = (cls, depth) => SIZE_CLASSES[cls].core * depth + 2.5;
+
+// The figure's brightest star (lowest size class; the first one on a tie) gets diffraction spikes.
+export function brightestIndex(pts) {
+  let best = 0;
+  for (let i = 1; i < pts.length; i++) if (pts[i].cls < pts[best].cls) best = i;
+  return best;
+}
 
 // `look` carries shared drawing state from main (the pre-rendered sprites).
 export function drawConstellation(ctx, view, c, t, dt, mouse, look) {
@@ -151,6 +160,12 @@ export function drawConstellation(ctx, view, c, t, dt, mouse, look) {
     const p = P[i], a = alpha * starIn(age, i);
     if (a <= 0.002) continue;
     const tw = Math.sin(t * 1.6 + p.ph);
+    // spikes under the brightest star, upright whatever the figure's rotation
+    if (i === c.spike && look.spike) {
+      const k = look.spike.size * s;
+      ctx.globalAlpha = a * (0.75 + 0.25 * tw);
+      ctx.drawImage(look.spike.canvas, p.x - k / 2, p.y - k / 2, k, k);
+    }
     const sp = look.sprites[p.cls];
     const d = sp.size * s * (0.96 + 0.04 * tw);
     ctx.globalAlpha = a * (0.86 + 0.14 * tw);

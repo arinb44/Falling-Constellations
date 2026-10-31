@@ -76,3 +76,13 @@ test('resize keeps existing stars, scales them, and matches the density', () => 
   fitStars({ W: 500, H: 400 }, 2000, 800, list);
   expect(list.length).toBe(starCountFor(500, 400));
 });
+
+test('the brightest star of a fully drawn figure gets one diffraction spike', () => {
+  const c = makeConstellation(500, 400, false, 0);
+  c.vy = 0; c.rotSpeed = 0;
+  const withSpike = { sprites: fakeSprites(), spike: { canvas: {}, size: 34 } };
+  const a = fakeCtx(), b = fakeCtx();
+  drawConstellation(a, view, c, 10, 0, mouse, look);
+  drawConstellation(b, view, c, 10, 0, mouse, withSpike);
+  expect(b.calls.drawImage - a.calls.drawImage).toBe(1);
+});

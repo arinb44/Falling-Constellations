@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { makeConstellation, targetCount, makeInk, INK_CREAM, INK_GOLD, lineWidthFor, gapFor,
+import { makeConstellation, targetCount, brightestIndex, makeInk, INK_CREAM, INK_GOLD, lineWidthFor, gapFor,
   starIn, fullyOnScreen, edgeProgress, STAR_STAGGER, STAR_FADE, SCREEN_MARGIN } from '../src/constellation.js';
 import { SIZE_CLASSES } from '../src/sprites.js';
 
@@ -133,4 +133,14 @@ test('draw-in lasts 2–4 s and lines have not started at birth', () => {
     expect(c.drawIn).toBeLessThan(4);
     expect(c.linesAt).toBe(-1);
   }
+});
+
+test('each figure puts its diffraction spike on its brightest star', () => {
+  for (let i = 0; i < 100; i++) {
+    const c = makeConstellation(0, 0, false);
+    const min = Math.min(...c.pts.map(p => p.cls));
+    expect(c.pts[c.spike].cls).toBe(min);
+    expect(c.pts[c.spike].cls).toBeLessThanOrEqual(1);
+  }
+  expect(brightestIndex([{ cls: 2 }, { cls: 0 }, { cls: 0 }])).toBe(1);   // first on a tie
 });

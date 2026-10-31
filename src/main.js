@@ -3,11 +3,12 @@ import { rand } from './util.js';
 import { fitStars, drawStars } from './starfield.js';
 import { makeConstellation, targetCount, countAuto, recycle, drawConstellation } from './constellation.js';
 import { maybeShoot, drawShooters } from './shooters.js';
-import { buildSprites } from './sprites.js';
+import { buildSprites, buildSpike } from './sprites.js';
 import { createField, drawFieldBack, drawFieldDust } from './sky/field.js';
 import { createBackLayer } from './galaxy/gl.js';
 import { createFrameStats, mountReadout } from './debug.js';
 import { baseScale, createQuality } from './quality.js';
+import { createGrid } from './grid.js';
 
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
@@ -15,7 +16,8 @@ const hint = document.getElementById('hint');
 const view = { W: 0, H: 0, DPR: 1 };
 
 /* ---------- Atlas look: star sprites drawn once ---------- */
-const look = { sprites: buildSprites() };
+const look = { sprites: buildSprites(), spike: buildSpike() };
+const grid = createGrid();
 
 /* ---------- far field: nebulae, dust, distant galaxies, clusters (one seed per visit) ---------- */
 const field = createField();
@@ -32,6 +34,7 @@ const makeBack = () => {
   catch (err) { console.error(err); return null; }
 };
 back = makeBack();
+field.withClouds = !back;   // the WebGL layer draws live clouds; only the 2D fallback needs baked ones
 
 /* ---------- device tuning ---------- */
 // Phones draw the WebGL layer below full DPR; the controller steps quality down if frames run slow.
@@ -44,6 +47,7 @@ glCanvas.addEventListener('webglcontextlost', e => { e.preventDefault(); });
 glCanvas.addEventListener('webglcontextrestored', () => {
   back = makeBack();
   if (back) { back.setQuality(quality.rung); back.resize(view.W, view.H, view.DPR * phoneScale()); }
+  else if (!field.withClouds) { field.withClouds = true; field.bake(view.W, view.H); }   // fell back to 2D
 });
 
 // Sim clock: advances by the clamped dt, so a paused or backgrounded tab
@@ -69,6 +73,7 @@ function resize() {
   view.W = innerWidth; view.H = innerHeight;
   canvas.width = view.W * view.DPR; canvas.height = view.H * view.DPR;
   ctx.setTransform(view.DPR, 0, 0, view.DPR, 0, 0);
+  grid.resize(view.W, view.H, view.DPR);
   if (back) back.resize(view.W, view.H, view.DPR * phoneScale());
   else fitStars(view, prevW, prevH);
   // keep the sky: constellations slide to the same relative x instead of regenerating
@@ -114,6 +119,7 @@ function frame(now) {
     drawStars(ctx, view, t, dt);
     drawFieldDust(ctx, view, field);
   }
+  grid.draw(ctx);
 
   // recycle: remove those that have fallen off, spawn new ones at the top
   recycle(cons, H);

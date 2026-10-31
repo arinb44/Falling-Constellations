@@ -1,5 +1,5 @@
 import { test, expect } from 'bun:test';
-import { SIZE_CLASSES, CLASS_WEIGHTS, SPRITE_SCALE, pickClass, buildSprites } from '../src/sprites.js';
+import { SIZE_CLASSES, CLASS_WEIGHTS, SPRITE_SCALE, pickClass, buildSprites, buildSpike, SPIKE } from '../src/sprites.js';
 
 test('there are 3–4 graded size classes, brightest first', () => {
   expect(SIZE_CLASSES.length).toBeGreaterThanOrEqual(3);
@@ -45,4 +45,15 @@ test('buildSprites draws one sprite per class, once, sized for max depth and DPR
     expect(sp.canvas.calls.fills).toBe(1);
   });
   expect(made.length).toBe(SIZE_CLASSES.length);
+});
+
+test('the diffraction spike is a faint upright cross, drawn once', () => {
+  const rects = [];
+  const canvas = { getContext: () => ({ createLinearGradient: () => ({ addColorStop() {} }), fillRect: (x, y, w, h) => rects.push([w, h]), fillStyle: '' }) };
+  const sp = buildSpike(() => canvas);
+  expect(sp.size).toBe(SPIKE.LEN);
+  expect(rects.length).toBe(2);
+  expect(rects.some(([w, h]) => w > h * 10)).toBe(true);        // horizontal bar
+  expect(rects.some(([w, h]) => h > w * 10)).toBe(true);        // vertical bar
+  expect(SPIKE.ALPHA).toBeLessThan(0.6);
 });

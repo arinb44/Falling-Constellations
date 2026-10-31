@@ -6,15 +6,16 @@ export const isPhone = ({ coarse, minSide }) => coarse && minSide < 768;
 export const baseScale = env => (isPhone(env) ? PHONE_SCALE : 1);
 
 // Rungs, best first: give up resolution, then galaxy stars, then bloom levels.
-// scale multiplies the base scale; stars is the share of galaxy stars drawn.
+// scale multiplies the base scale; stars is the share of galaxy stars drawn; cloudHz is how
+// often the live nebulae are redrawn (their texture also follows scale).
 export const LADDER = [
-  { scale: 1, stars: 1, bloom: 6 },
-  { scale: 0.8, stars: 1, bloom: 6 },
-  { scale: 0.65, stars: 1, bloom: 6 },
-  { scale: 0.65, stars: 0.6, bloom: 6 },
-  { scale: 0.65, stars: 0.35, bloom: 6 },
-  { scale: 0.65, stars: 0.35, bloom: 3 },
-  { scale: 0.5, stars: 0.35, bloom: 0 }
+  { scale: 1, stars: 1, bloom: 6, cloudHz: 15 },
+  { scale: 0.8, stars: 1, bloom: 6, cloudHz: 15 },
+  { scale: 0.65, stars: 1, bloom: 6, cloudHz: 15 },
+  { scale: 0.65, stars: 0.6, bloom: 6, cloudHz: 15 },
+  { scale: 0.65, stars: 0.35, bloom: 6, cloudHz: 10 },
+  { scale: 0.65, stars: 0.35, bloom: 3, cloudHz: 10 },
+  { scale: 0.5, stars: 0.35, bloom: 0, cloudHz: 6 }
 ];
 
 export const Q = {

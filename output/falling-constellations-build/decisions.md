@@ -29,3 +29,8 @@
 | 2026-10-31 | Milestone 4 and shooting-star commits | Two commits: `f0b75d1` (Milestone 4) and `a700805` (shooting stars) |
 | 2026-10-31 | Milestone 5 look (dust on inner arm edges, pink H-II knots on outer edges, gas 0.12, grading 0.88 sat / 0.96 brightness) | **Looks good, commit** |
 | 2026-10-31 | Milestone 6 (phone 0.65× DPR, adaptive quality ladder, context-loss rebuild, `#gl` dark background, HANDOFF.md rewrite) | **Commit** |
+| 2026-10-31 | Optional upgrades and nebulae (request: build the optional choices and "the nebulae to be dynamic, they should act like clouds"). Asked: motion, which nebulae, approach. | **Billow and change shape, form and dissolve, keep the pulses; field nebulae only; live GPU noise.** Plus spikes (18) and grid (19) as Milestone 7 |
+| 2026-10-31 | Milestone 7 plan addendum | **Approved** |
+| 2026-10-31 | Resume: Milestone 7 found part-built as recorded | **Continue from the Atlas grid** |
+| 2026-10-31 | Dynamic far field (request: "make the background star clusters and distant galaxies dynamic as well... the pink clusters on the outside of the galaxy arms should also move"). Asked how each should move. | **Galaxies: spin and shimmer. Clusters: twinkle and swirl. Pink knots: live along the arms (slide along the outer edge, born and fade, respawn elsewhere).** Planned as Milestone 8 |
+| 2026-10-31 | Milestone 8 plan; commit Milestone 7 first | **Approved; commit Milestone 7 first** |
