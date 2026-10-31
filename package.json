@@ -1,0 +1,9 @@
+{
+  "name": "falling-constellations",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "serve": "bun scripts/serve.js 8000"
+  }
+}

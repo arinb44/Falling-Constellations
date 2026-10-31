@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Falling Constellations</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #02030a; overflow: hidden; }
+  canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  #hint {
+    position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+    font: 12px/1 ui-monospace, Menlo, Consolas, monospace; letter-spacing: .18em;
+    color: rgba(170, 190, 230, .45); text-transform: uppercase; pointer-events: none;
+    transition: opacity 1.5s;
+  }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hint">click to summon a constellation</div>
+<script type="module" src="src/main.js"></script>
+</body>
+</html>
