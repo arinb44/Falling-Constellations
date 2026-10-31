@@ -10,7 +10,8 @@ export function makeInk(m = rand(0.25, 0.65)) {
   return `rgb(${c[0]},${c[1]},${c[2]})`;
 }
 
-export function makeConstellation(x, y, atTop) {
+// `now` is the sim clock from main; `isAuto` marks figures the spawner owns (clicks are not).
+export function makeConstellation(x, y, atTop, now = 0, isAuto = true) {
   const n = randInt(5, 11);
   const pts = [{ x: 0, y: 0 }];
   let guard = 0;
@@ -47,16 +48,35 @@ export function makeConstellation(x, y, atTop) {
 
   const depth = rand(0.55, 1.35);
   return {
-    pts, edges, ink: makeInk(),
+    pts, edges, ink: makeInk(), isAuto,
+    // projected screen points, allocated once and rewritten every frame
+    P: pts.map(p => ({ x: 0, y: 0, cls: p.cls, ph: p.ph })),
     x, y: atTop ? -160 * depth : y,
     depth, vy: 16 + 30 * depth + rand(-4, 4),
     swayAmp: rand(8, 28), swayFreq: rand(0.15, 0.4), swayPh: Math.random() * 6.28, baseX: x,
     rot: rand(0, 6.283), rotSpeed: rand(-0.05, 0.05),
-    born: performance.now() / 1000, drawIn: rand(2, 4), linesAt: -1
+    born: now, drawIn: rand(2, 4), linesAt: -1
   };
 }
 
 export const targetCount = view => Math.max(5, Math.round(view.W / 130));
+
+export function countAuto(cons) {
+  let n = 0;
+  for (let i = 0; i < cons.length; i++) if (cons[i].isAuto) n++;
+  return n;
+}
+
+// Drop constellations that have fallen past the bottom, compacting the array in place.
+export function recycle(cons, H) {
+  let k = 0;
+  for (let i = 0; i < cons.length; i++) if (cons[i].y < H + 200) cons[k++] = cons[i];
+  cons.length = k;
+  return cons;
+}
+
+// Eased fade near the bottom edge (starts 160 px above it, gone 60 px below).
+export const fadeOutBottom = (y, H) => 1 - easeInOutCubic((y - (H - 160)) / 220);
 
 /* ---------- draw-in: stars first, then lines once the figure is on screen ---------- */
 export const STAR_STAGGER = 0.14, STAR_FADE = 0.7, EDGE_OVERLAP = 1.6, SCREEN_MARGIN = 24;
@@ -87,38 +107,44 @@ export function drawConstellation(ctx, view, c, t, dt, mouse, look) {
 
   const span = 150 * c.depth;
   const fadeTop = smooth((c.y + span) / 140);
-  const fadeBot = 1 - smooth((c.y - (H - 160)) / 200);
   const age = t - c.born;
-  const alpha = Math.min(fadeTop, fadeBot);
+  const alpha = Math.min(fadeTop, fadeOutBottom(c.y, H));
   if (alpha <= 0.002) return;
 
   const cos = Math.cos(c.rot), sin = Math.sin(c.rot), s = c.depth;
-  const P = c.pts.map(p => ({ x: c.x + (p.x * cos - p.y * sin) * s, y: c.y + (p.x * sin + p.y * cos) * s, cls: p.cls, ph: p.ph }));
-
-  // lines wait until all the stars are in and the whole figure is on screen
-  if (c.linesAt < 0 && age >= (P.length - 1) * STAR_STAGGER + STAR_FADE) {
-    let minY = Infinity, maxY = -Infinity;
-    for (const p of P) { if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y; }
-    if (fullyOnScreen(minY, maxY, H)) c.linesAt = t;
+  const P = c.P, pts = c.pts;
+  let minY = Infinity, maxY = -Infinity;
+  for (let i = 0; i < P.length; i++) {
+    const p = pts[i], q = P[i];
+    q.x = c.x + (p.x * cos - p.y * sin) * s;
+    q.y = c.y + (p.x * sin + p.y * cos) * s;
+    if (q.y < minY) minY = q.y;
+    if (q.y > maxY) maxY = q.y;
   }
 
+  // lines wait until all the stars are in and the whole figure is on screen
+  if (c.linesAt < 0 && age >= (P.length - 1) * STAR_STAGGER + STAR_FADE && fullyOnScreen(minY, maxY, H)) c.linesAt = t;
+
   // engraved lines grow in one after another
-  ctx.lineCap = 'round';
-  ctx.strokeStyle = c.ink;
-  ctx.lineWidth = lineWidthFor(s);
-  ctx.globalAlpha = 0.34 * alpha;
   const prog = c.linesAt < 0 ? 0 : (t - c.linesAt) / c.drawIn;
-  if (prog > 0) c.edges.forEach(([a, b], i) => {
-    const e = edgeProgress(prog, i, c.edges.length);
-    if (e <= 0) return;
-    const A = P[a], B = P[b];
-    const dx = B.x - A.x, dy = B.y - A.y, L = Math.hypot(dx, dy);
-    const ga = gapFor(A.cls, s), gb = gapFor(B.cls, s);
-    if (L <= ga + gb) return;
-    const ux = dx / L, uy = dy / L, run = (L - ga - gb) * e;
-    const x0 = A.x + ux * ga, y0 = A.y + uy * ga;
-    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + ux * run, y0 + uy * run); ctx.stroke();
-  });
+  if (prog > 0) {
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = c.ink;
+    ctx.lineWidth = lineWidthFor(s);
+    ctx.globalAlpha = 0.34 * alpha;
+    const E = c.edges, n = E.length;
+    for (let i = 0; i < n; i++) {
+      const e = edgeProgress(prog, i, n);
+      if (e <= 0) break;                       // later edges start later still
+      const A = P[E[i][0]], B = P[E[i][1]];
+      const dx = B.x - A.x, dy = B.y - A.y, L = Math.hypot(dx, dy);
+      const ga = gapFor(A.cls, s), gb = gapFor(B.cls, s);
+      if (L <= ga + gb) continue;
+      const ux = dx / L, uy = dy / L, run = (L - ga - gb) * e;
+      const x0 = A.x + ux * ga, y0 = A.y + uy * ga;
+      ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + ux * run, y0 + uy * run); ctx.stroke();
+    }
+  }
 
   // graded stars from pre-rendered sprites, with a gentle twinkle
   for (let i = 0; i < P.length; i++) {

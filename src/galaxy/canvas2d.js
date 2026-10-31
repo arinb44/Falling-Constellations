@@ -18,16 +18,21 @@ export function buildGalaxy() {
   }
 }
 
+let core = null, coreW = 0, coreH = 0;
+
 export function drawGalaxy(ctx, view, t) {
   const { W, H } = view;
   const cx = W * 0.5, cy = H * 0.5;
   const R = Math.max(W, H) * 0.62;
   const tilt = -0.35, ct = Math.cos(tilt), st = Math.sin(tilt);
-  // soft core glow
-  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.35);
-  g.addColorStop(0, 'rgba(255,220,170,0.16)');
-  g.addColorStop(1, 'rgba(255,220,170,0)');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  // soft core glow, rebuilt only when the window size changes
+  if (coreW !== W || coreH !== H) {
+    core = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 0.35);
+    core.addColorStop(0, 'rgba(255,220,170,0.16)');
+    core.addColorStop(1, 'rgba(255,220,170,0)');
+    coreW = W; coreH = H;
+  }
+  ctx.fillStyle = core; ctx.fillRect(0, 0, W, H);
 
   ctx.globalCompositeOperation = 'lighter';
   for (let b = 0; b < BUCKETS.length; b++) {
